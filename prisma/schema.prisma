@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Visibility {
+  PRIVATE
+  USER
+  GROUP
+  YEAR
+}
+
+enum FileType {
+  PDF
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  indexNumber  String   @unique
+  yearOfStudy  Int
+  studyGroup   String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  files            File[]
+  sharePermissions SharePermission[]
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+
+  files FileTag[]
+}
+
+model File {
+  id         String     @id @default(cuid())
+  name       String
+  storagePath String
+  mimeType   String
+  fileType   FileType
+  size       Int
+  visibility Visibility @default(PRIVATE)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  tags             FileTag[]
+  sharePermissions SharePermission[]
+}
+
+model FileTag {
+  fileId String
+  tagId  String
+
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([fileId, tagId])
+}
+
+/// Links a file to a target audience. The semantics depend on `visibility`:
+/// - USER:  `targetValue` holds the recipient's userId
+/// - GROUP: `targetValue` holds the studyGroup string (e.g. "4ID12B")
+/// - YEAR:  `targetValue` holds the year as a string (e.g. "3")
+model SharePermission {
+  id          String     @id @default(cuid())
+  visibility  Visibility
+  targetValue String
+  createdAt   DateTime   @default(now())
+
+  fileId String
+  file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  grantedToId String?
+  grantedTo   User?   @relation(fields: [grantedToId], references: [id], onDelete: SetNull)
+
+  @@index([fileId])
+  @@index([targetValue])
+}
