@@ -11,89 +11,132 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
+enum UserRole {
+  STUDENT
+  ADMIN
+}
 
 enum Visibility {
   PRIVATE
-  USER
+  DIRECT
   GROUP
   YEAR
 }
 
-enum FileType {
-  PDF
-  IMAGE
-  VIDEO
-  AUDIO
-}
-
-// ─── Models ──────────────────────────────────────────────────────────────────
-
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  indexNumber  String   @unique
-  yearOfStudy  Int
-  studyGroup   String
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String    @id @default(uuid())
+  /// Email domain should be validated at the application layer:
+  /// @stud.prz.edu.pl
+  email         String    @unique
+  passwordHash  String?
+  emailVerified DateTime?
+  studentIndex  String?   @unique
+  yearOfStudy   Int?
+  studyGroup    String?
+  isVerified    Boolean   @default(false)
+  role          UserRole  @default(STUDENT)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  files            File[]
-  sharePermissions SharePermission[]
+  files               File[]
+  receivedPermissions SharePermission[] @relation("UserSharePermissions")
+
+  accounts Account[]
+  sessions Session[]
+
+  @@map("User")
 }
 
-model Tag {
-  id    String @id @default(cuid())
-  name  String @unique
+model Account {
+  id                 String  @id @default(uuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
 
-  files FileTag[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("Account")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("Session")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("VerificationToken")
 }
 
 model File {
-  id         String     @id @default(cuid())
-  name       String
-  storagePath String
-  mimeType   String
-  fileType   FileType
-  size       Int
+  id         String     @id @default(uuid())
+  title      String
+  url        String
+  format     String
   visibility Visibility @default(PRIVATE)
   createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
 
   authorId String
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   tags             FileTag[]
   sharePermissions SharePermission[]
+
+  @@index([authorId])
+  @@index([visibility])
+  @@map("File")
+}
+
+model Tag {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  files FileTag[]
+
+  @@map("Tag")
 }
 
 model FileTag {
   fileId String
-  tagId  String
+  tagId  Int
 
   file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
   tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([fileId, tagId])
+  @@map("FileTag")
 }
 
-/// Links a file to a target audience. The semantics depend on `visibility`:
-/// - USER:  `targetValue` holds the recipient's userId
-/// - GROUP: `targetValue` holds the studyGroup string (e.g. "4ID12B")
-/// - YEAR:  `targetValue` holds the year as a string (e.g. "3")
+/// Direct sharing: links a file with one specific recipient user.
 model SharePermission {
-  id          String     @id @default(cuid())
-  visibility  Visibility
-  targetValue String
-  createdAt   DateTime   @default(now())
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
 
   fileId String
   file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
-  grantedToId String?
-  grantedTo   User?   @relation(fields: [grantedToId], references: [id], onDelete: SetNull)
+  recipientId String
+  recipient   User   @relation("UserSharePermissions", fields: [recipientId], references: [id], onDelete: Cascade)
 
-  @@index([fileId])
-  @@index([targetValue])
+  @@unique([fileId, recipientId])
+  @@index([recipientId])
+  @@map("SharePermission")
 }

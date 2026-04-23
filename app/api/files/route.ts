@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/db/prisma";
 import { Visibility } from "../../../app/generated/prisma/client";
+import { auth } from "@/auth";
+import { writeFile, mkdir } from "fs/promises";
+import { join } from "path";
+import { v4 as uuidv4 } from "uuid";
 
 export interface GetFilesOptions {
   /** The ID of the requesting user. */
@@ -20,9 +24,8 @@ export interface GetFilesOptions {
  *
  * Access rules (OR-combined):
  *  1. The user is the file author (owns the file).
- *  2. There is a SharePermission with visibility=USER targeting this userId.
- *  3. There is a SharePermission with visibility=GROUP targeting the user's studyGroup.
- *  4. There is a SharePermission with visibility=YEAR targeting the user's yearOfStudy.
+ *  2. The file is directly shared with the user via SharePermission.recipientId.
+ *  3. The file has GROUP/YEAR visibility (global audience bucket).
  *
  * Prisma performs the necessary JOINs so we never load data for files the
  * user cannot access.
@@ -43,7 +46,7 @@ export async function getAccessibleFiles(options: GetFilesOptions) {
       where: buildAccessFilter(requestingUser, tag, search),
       include: {
         author: {
-          select: { id: true, email: true, indexNumber: true, studyGroup: true },
+          select: { id: true, email: true, studentIndex: true, studyGroup: true },
         },
         tags: { include: { tag: true } },
         sharePermissions: true,
@@ -71,7 +74,7 @@ export async function getAccessibleFiles(options: GetFilesOptions) {
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 function buildAccessFilter(
-  user: { id: string; studyGroup: string; yearOfStudy: number },
+  user: { id: string; studyGroup: string | null; yearOfStudy: number | null },
   tag?: string,
   search?: string
 ) {
@@ -91,7 +94,7 @@ function buildAccessFilter(
         : []),
       // Optional name search
       ...(search
-        ? [{ name: { contains: search, mode: "insensitive" as const } }]
+        ? [{ title: { contains: search, mode: "insensitive" as const } }]
         : []),
       // Visibility / access-control filter
       {
@@ -102,29 +105,13 @@ function buildAccessFilter(
           {
             sharePermissions: {
               some: {
-                visibility: Visibility.USER,
-                targetValue: user.id,
+                recipientId: user.id,
               },
             },
           },
-          // Rule 3 – same study group
-          {
-            sharePermissions: {
-              some: {
-                visibility: Visibility.GROUP,
-                targetValue: user.studyGroup,
-              },
-            },
-          },
-          // Rule 4 – same year of study
-          {
-            sharePermissions: {
-              some: {
-                visibility: Visibility.YEAR,
-                targetValue: String(user.yearOfStudy),
-              },
-            },
-          },
+          // Rule 3 – broadcast-style visibility buckets
+          { visibility: Visibility.GROUP },
+          { visibility: Visibility.YEAR },
         ],
       },
     ],
@@ -135,16 +122,13 @@ function buildAccessFilter(
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-
-    // In a real app this would come from the session / JWT.
-    const userId = searchParams.get("userId");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "userId query parameter is required." },
-        { status: 400 }
-      );
+    const session = await auth();
+    if (!session || !session.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = session.user.id;
+
+    const { searchParams } = new URL(request.url);
 
     const tag = searchParams.get("tag") ?? undefined;
     const search = searchParams.get("search") ?? undefined;
@@ -164,6 +148,74 @@ export async function GET(request: NextRequest) {
     console.error("[GET /api/files]", error);
     return NextResponse.json(
       { error: "Internal server error." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth();
+    if (!session || !session.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
+    const title = (formData.get("title") as string) || file.name;
+    const categoryName = (formData.get("category") as string) || "Inne";
+    const visibilityStr = formData.get("visibility") as string;
+
+    let visibility = Visibility.PRIVATE;
+    if (visibilityStr === "Moja Grupa") visibility = Visibility.GROUP;
+    if (visibilityStr === "Cały Rocznik") visibility = Visibility.YEAR;
+
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const fileId = uuidv4();
+
+    // Save locally to an 'uploads' directory, OUTSIDE of the 'public' folder
+    const uploadDir = join(process.cwd(), "uploads");
+    await mkdir(uploadDir, { recursive: true });
+
+    const filePath = join(uploadDir, fileId);
+
+    await writeFile(filePath, buffer);
+
+    // The URL points to our new authenticated endpoint!
+    const fileUrl = `/api/files/${fileId}`;
+
+    // Upsert Tag
+    const tagRecord = await prisma.tag.upsert({
+      where: { name: categoryName },
+      update: {},
+      create: { name: categoryName },
+    });
+
+    const newFile = await prisma.file.create({
+      data: {
+        id: fileId,
+        title,
+        url: fileUrl,
+        format: file.type || "application/octet-stream",
+        visibility,
+        authorId: session.user.id,
+        tags: {
+          create: [{ tagId: tagRecord.id }],
+        },
+      },
+    });
+
+    return NextResponse.json({ success: true, file: newFile });
+  } catch (error) {
+    console.error("[POST /api/files]", error);
+    return NextResponse.json(
+      { error: "Internal server error during upload." },
       { status: 500 }
     );
   }
