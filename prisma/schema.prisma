@@ -93,6 +93,7 @@ model File {
   format     String
   visibility Visibility @default(PRIVATE)
   createdAt  DateTime   @default(now())
+  pages      Int        @default(1)
 
   authorId String
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)

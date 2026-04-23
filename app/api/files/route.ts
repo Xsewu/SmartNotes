@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 export interface GetFilesOptions {
   /** The ID of the requesting user. */
@@ -187,6 +188,16 @@ export async function POST(request: NextRequest) {
 
     await writeFile(filePath, buffer);
 
+    let pages = 1;
+    try {
+      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        const pdfData = await pdfParse(buffer);
+        pages = pdfData.numpages || 1;
+      }
+    } catch (err) {
+      console.warn("Nie udalo sie zliczyc stron PDF:", err);
+    }
+
     // The URL points to our new authenticated endpoint!
     const fileUrl = `/api/files/${fileId}`;
 
@@ -204,6 +215,7 @@ export async function POST(request: NextRequest) {
         url: fileUrl,
         format: file.type || "application/octet-stream",
         visibility,
+        pages,
         authorId: session.user.id,
         tags: {
           create: [{ tagId: tagRecord.id }],
