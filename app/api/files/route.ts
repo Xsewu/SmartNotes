@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
+// @ts-ignore
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 export interface GetFilesOptions {
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
     const categoryName = (formData.get("category") as string) || "Inne";
     const visibilityStr = formData.get("visibility") as string;
 
-    let visibility = Visibility.PRIVATE;
+    let visibility: Visibility = Visibility.PRIVATE;
     if (visibilityStr === "Moja Grupa") visibility = Visibility.GROUP;
     if (visibilityStr === "Cały Rocznik") visibility = Visibility.YEAR;
 

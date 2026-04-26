@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+nextjs-portal {
+  display: none !important;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

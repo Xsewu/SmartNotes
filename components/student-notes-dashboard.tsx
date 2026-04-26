@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useDeferredValue, useEffect, useMemo, useState, useRef, useTransition, useOptimistic } from "react";
 import {
@@ -81,7 +82,7 @@ function NoteRow({
   return (
     <div
       onClick={onClick}
-      className="group w-full flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-3 cursor-pointer transition-colors hover:bg-slate-50"
+      className="group w-full flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-3 cursor-pointer transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/80"
     >
       <div className="flex items-center gap-4 min-w-0">
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${note.accent} text-white shadow-sm`}>
@@ -90,30 +91,30 @@ function NoteRow({
         
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2">
-            <h4 className="truncate text-sm font-semibold text-slate-900">{note.title}</h4>
-            <span className="shrink-0 text-[11px] text-slate-400 font-medium">{note.updatedAt}</span>
+            <h4 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{note.title}</h4>
+            <span className="shrink-0 text-[11px] text-slate-400 font-medium dark:text-slate-500">{note.updatedAt}</span>
             <div className="hidden sm:flex flex-wrap items-center gap-1.5 ml-2">
-              <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 {note.category}
               </span>
               {note.tags.slice(0, 2).map((tag) => (
-                <span key={tag} className="inline-flex rounded-full bg-slate-50 border border-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                <span key={tag} className="inline-flex rounded-full bg-slate-50 border border-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
                   {tag}
                 </span>
               ))}
             </div>
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500 truncate">
+          <div className="mt-0.5 text-[11px] text-slate-500 truncate dark:text-slate-400">
             Udostępniono: {note.sharedWith}
           </div>
         </div>
       </div>
 
       <div className="flex items-center gap-3 shrink-0">
-        <div className="text-xs font-medium text-slate-600 hidden sm:block whitespace-nowrap">{note.pages} str.</div>
+        <div className="text-xs font-medium text-slate-600 hidden sm:block whitespace-nowrap dark:text-slate-400">{note.pages} str.</div>
         <button
           onClick={onShare}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-blue-600 hover:shadow-sm border border-transparent hover:border-slate-200 transition-all focus:outline-none"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-blue-600 hover:shadow-sm border border-transparent hover:border-slate-200 transition-all focus:outline-none dark:text-slate-500 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-blue-400"
           title="Udostępnij"
         >
           <Share2 className="h-4 w-4" />
@@ -122,6 +123,8 @@ function NoteRow({
     </div>
   );
 }
+
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function StudentNotesDashboard({ user }: { user?: { email?: string | null } }) {
   const [currentView, setCurrentView] = useState<ViewState>("dashboard");
@@ -146,6 +149,26 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        userMenuOpen &&
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target as Node) &&
+        headerMenuRef.current &&
+        !headerMenuRef.current.contains(event.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [userMenuOpen]);
+
   const [isPending, startTransition] = useTransition();
 
   const {
@@ -268,9 +291,9 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   ] as const;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 font-sans">
+    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50 font-sans">
       {/* Sidebar */}
-      <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
+      <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-800 md:flex">
         <div className="flex h-20 items-center px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
@@ -290,11 +313,11 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 onClick={() => setCurrentView(item.id)}
                 className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-slate-950 text-white shadow-md shadow-slate-950/10"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                    ? "bg-slate-950 text-white shadow-md shadow-slate-950/10 dark:bg-slate-800"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-500"}`} />
+                <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-500 dark:text-slate-400"}`} />
                 {item.label}
               </button>
             );
@@ -302,31 +325,51 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
         </nav>
 
         {/* User profile info in sidebar */}
-        <div className="border-t border-slate-200 p-4">
-          <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm">
+        <div className="border-t border-slate-200 dark:border-slate-800 p-4 relative" ref={userMenuRef}>
+          <button 
+            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            className="w-full text-left flex items-center gap-3 rounded-xl hover:bg-slate-50 p-2 transition-colors dark:hover:bg-slate-800"
+          >
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm dark:bg-blue-900/50 dark:border-blue-800 dark:text-blue-400">
               {user?.email?.[0]?.toUpperCase() || "U"}
             </div>
             <div className="flex-1 truncate">
-              <p className="truncate text-sm font-medium text-slate-950">{user?.email || "Nie zalogowano"}</p>
-              <p className="text-xs text-slate-500">Student</p>
+              <p className="truncate text-sm font-medium text-slate-950 dark:text-slate-200">{user?.email || "Nie zalogowano"}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Student</p>
             </div>
-          </div>
-          <button
-            onClick={() => signOut({ callbackUrl: '/' })}
-            className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Wyloguj się
           </button>
+          
+          {userMenuOpen && (
+            <div className="absolute bottom-full left-4 right-4 mb-2 rounded-xl border border-slate-200 bg-white p-2 shadow-xl animate-in fade-in slide-in-from-bottom-2 dark:border-slate-700 dark:bg-slate-800">
+              <div className="px-3 py-2 border-b border-slate-100 mb-2 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-900 truncate dark:text-slate-200">{user?.email}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Konto studenckie</p>
+              </div>
+              <Link
+                href="/settings"
+                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 mb-1 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                onClick={() => setUserMenuOpen(false)}
+              >
+                <Users className="h-4 w-4" />
+                Ustawienia
+              </Link>
+              <button
+                onClick={() => signOut({ callbackUrl: '/' })}
+                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors dark:text-rose-400 dark:hover:bg-rose-950/20"
+              >
+                <LogOut className="h-4 w-4" />
+                Wyloguj się
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Main Area */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.06),_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#f1f5f9_100%)]">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.06),_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#f1f5f9_100%)] dark:bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.1),_transparent_40%),linear-gradient(180deg,_#0f172a_0%,_#020617_100%)]">
         {/* Header (Top bar) */}
-        <header className="flex h-20 items-center justify-between border-b border-slate-200/60 bg-white/50 px-6 backdrop-blur-md lg:px-8">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+        <header className="flex h-20 items-center justify-between border-b border-slate-200/60 bg-white/50 px-6 backdrop-blur-md lg:px-8 dark:border-slate-800/60 dark:bg-slate-900/50">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {navItems.find((i) => i.id === currentView)?.label}
           </h1>
           
@@ -344,7 +387,40 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 className="h-10 w-full rounded-full border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
               />
             </div>
-            {/* Mobile menu could go here */}
+            
+            <ThemeToggle />
+
+            {/* Mobile / Tablet user profile button */}
+            <div className="relative md:hidden" ref={headerMenuRef}>
+              <button 
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm"
+              >
+                {user?.email?.[0]?.toUpperCase() || "U"}
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 animate-in fade-in slide-in-from-top-2">
+                  <div className="px-3 py-2 border-b border-slate-100 mb-2">
+                    <p className="text-sm font-medium text-slate-900 truncate">{user?.email}</p>
+                  </div>
+                  <Link
+                    href="/settings"
+                    className="w-full flex items-center gap-2 rounded-lg px-3 py-2 mb-1 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Users className="h-4 w-4" />
+                    Ustawienia
+                  </Link>
+                  <button
+                    onClick={() => signOut({ callbackUrl: '/' })}
+                    className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Wyloguj się
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -355,11 +431,11 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
           {currentView === "dashboard" && (
             <div className="mx-auto max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               {/* Welcome Section */}
-              <div className="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-sm sm:p-10 relative overflow-hidden">
-                <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-blue-100/50 blur-3xl"></div>
+              <div className="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-sm sm:p-10 relative overflow-hidden dark:border-slate-800/80 dark:bg-slate-900">
+                <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-blue-100/50 blur-3xl dark:bg-blue-900/20"></div>
                 <div className="relative z-10 max-w-2xl">
-                  <h2 className="text-3xl font-bold text-slate-900">Czesc! Masz 12 nowych plików na swoim roku.</h2>
-                  <p className="mt-3 text-lg text-slate-600">
+                  <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Cześć! Masz 12 nowych plików na swoim roku.</h2>
+                  <p className="mt-3 text-lg text-slate-600 dark:text-slate-400">
                     Studenci z Twojej grupy udostępnili w tym tygodniu przydatne materiały. Zobacz najnowsze skrypty i przykładowe zadania z kolokwiów.
                   </p>
                   <button 
@@ -374,28 +450,28 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
               {/* Stats Section */}
               <div>
-                <h3 className="mb-4 hidden text-lg font-semibold text-slate-900 sm:block">Podsumowanie Twojego konta</h3>
+                <h3 className="mb-4 hidden text-lg font-semibold text-slate-900 dark:text-slate-100 sm:block">Podsumowanie Twojego konta</h3>
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between text-slate-500">
-                      <span className="text-sm font-medium text-slate-600">Udostępnione pliki</span>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Udostępnione pliki</span>
                       <UploadCloud className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900">8</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">8</span>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between text-slate-500">
-                      <span className="text-sm font-medium text-slate-600">Pobrane materiały</span>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Pobrane materiały</span>
                       <FileUp className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900">42</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">42</span>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between text-slate-500">
-                      <span className="text-sm font-medium text-slate-600">Aktywność w grupie</span>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Aktywność w grupie</span>
                       <Users className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900">Wysoka</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">Wysoka</span>
                   </div>
                 </div>
               </div>
@@ -403,8 +479,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
               {/* Ostatnio przeglądane - Kafelki/Grid */}
               <div>
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-slate-900">Ostatnio dodane pliki w sieci</h3>
-                  <button onClick={() => setCurrentView('my-notes')} className="text-sm font-medium text-blue-600 hover:text-blue-700">Pokaż wszystko &rarr;</button>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Ostatnio dodane pliki w sieci</h3>
+                  <button onClick={() => setCurrentView('my-notes')} className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">Pokaż wszystko &rarr;</button>
                 </div>
                 
                 <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -412,7 +488,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     <div 
                       key={note.id} 
                       onClick={() => setSelectedNote(note)}
-                      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300"
+                      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
                     >
                       {/* Generowany miniaturowy podgląd - Grid z obrazkiem */}
                       <div className={`h-36 w-full bg-gradient-to-br ${note.accent} p-4 flex flex-col justify-between opacity-90 transition-opacity group-hover:opacity-100`}>
@@ -424,18 +500,18 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                         <ImageIcon className="h-8 w-8 text-white/50" />
                       </div>
                       
-                      <div className="flex flex-1 flex-col p-4">
-                        <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{note.title}</h4>
+                      <div className="flex flex-1 flex-col p-4 dark:border-t-slate-800">
+                        <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">{note.title}</h4>
                         <div className="mt-auto pt-4 flex flex-wrap gap-1">
                            {note.tags.slice(0, 2).map((tag) => (
-                             <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                             <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                                {tag}
                              </span>
                            ))}
                         </div>
-                        <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                        <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                           <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
-                          <span className="font-semibold text-slate-700">{note.pages} str.</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{note.pages} str.</span>
                         </div>
                       </div>
                     </div>
@@ -456,8 +532,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                         onClick={() => setActiveCategory(category)}
                         className={`rounded-full border px-5 py-2.5 text-sm font-medium transition-all ${
                           activeCategory === category
-                            ? "border-slate-950 bg-slate-950 text-white shadow-sm"
-                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                            ? "border-slate-950 bg-slate-950 text-white shadow-sm dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-700"
                         }`}
                       >
                         {category}
@@ -465,13 +541,13 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     ))}
                   </div>
 
-                  <div className="flex rounded-lg bg-slate-100 p-1 shadow-sm border border-slate-200">
+                  <div className="flex rounded-lg bg-slate-100 p-1 shadow-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800">
                     <button
                       onClick={() => setViewMode('grid')}
                       className={`flex items-center justify-center rounded-md p-2 transition-all ${
                         viewMode === 'grid' 
-                          ? 'bg-slate-950 text-white shadow-md' 
-                          : 'text-slate-500 hover:text-slate-900'
+                          ? 'bg-slate-950 text-white shadow-md dark:bg-slate-700 dark:text-slate-100' 
+                          : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
                       }`}
                     >
                       <LayoutGrid className="h-4 w-4" />
@@ -480,8 +556,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                       onClick={() => setViewMode('list')}
                       className={`flex items-center justify-center rounded-md p-2 transition-all ${
                         viewMode === 'list' 
-                          ? 'bg-slate-950 text-white shadow-md' 
-                          : 'text-slate-500 hover:text-slate-900'
+                          ? 'bg-slate-950 text-white shadow-md dark:bg-slate-700 dark:text-slate-100' 
+                          : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
                       }`}
                     >
                       <List className="h-4 w-4" />
@@ -493,30 +569,30 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                   {isLoading ? (
                     viewMode === 'grid' ? (
                     Array.from({ length: 8 }).map((_, i) => (
-                      <div key={i} className="h-[280px] w-full animate-pulse rounded-2xl border border-slate-200 bg-white">
-                        <div className="h-36 rounded-t-2xl bg-slate-100"></div>
+                      <div key={i} className="h-[280px] w-full animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                        <div className="h-36 rounded-t-2xl bg-slate-100 dark:bg-slate-800"></div>
                         <div className="p-4 space-y-3">
-                          <div className="h-4 w-3/4 rounded bg-slate-100"></div>
-                          <div className="h-4 w-1/2 rounded bg-slate-100"></div>
+                          <div className="h-4 w-3/4 rounded bg-slate-100 dark:bg-slate-800"></div>
+                          <div className="h-4 w-1/2 rounded bg-slate-100 dark:bg-slate-800"></div>
                         </div>
                       </div>
                     ))
                   ) : (
                     Array.from({ length: 5 }).map((_, i) => (
-                      <div key={i} className="h-20 w-full animate-pulse rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-4">
-                        <div className="h-12 w-12 rounded bg-slate-100 shrink-0"></div>
+                      <div key={i} className="h-20 w-full animate-pulse rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-4 dark:border-slate-800 dark:bg-slate-900">
+                        <div className="h-12 w-12 rounded bg-slate-100 shrink-0 dark:bg-slate-800"></div>
                         <div className="space-y-2 flex-1">
-                          <div className="h-4 w-1/3 rounded bg-slate-100"></div>
-                          <div className="h-3 w-1/4 rounded bg-slate-100"></div>
+                          <div className="h-4 w-1/3 rounded bg-slate-100 dark:bg-slate-800"></div>
+                          <div className="h-3 w-1/4 rounded bg-slate-100 dark:bg-slate-800"></div>
                         </div>
                       </div>
                     ))
                   )
                 ) : filteredNotes.length === 0 ? (
-                  <div className="col-span-full rounded-[2rem] border border-dashed border-slate-300 p-12 text-center">
-                      <Search className="mx-auto h-10 w-10 text-slate-300" />
-                      <h3 className="mt-4 text-lg font-semibold text-slate-900">Brak wyników</h3>
-                      <p className="text-slate-500">Nie znaleźliśmy notatek pasujących do tego zapytania.</p>
+                  <div className="col-span-full rounded-[2rem] border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
+                      <Search className="mx-auto h-10 w-10 text-slate-300 dark:text-slate-600" />
+                      <h3 className="mt-4 text-lg font-semibold text-slate-900 dark:text-slate-100">Brak wyników</h3>
+                      <p className="text-slate-500 dark:text-slate-400">Nie znaleźliśmy notatek pasujących do tego zapytania.</p>
                     </div>
                   ) : (
                     <AnimatePresence mode="wait">
@@ -531,13 +607,14 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                         {filteredNotes.map(note => (
                           <motion.div
                             key={note.id}
+                            // @ts-ignore
                             variants={itemVariants}
                             className="w-full"
                           >
                             {viewMode === 'grid' ? (
                               <div 
                                 onClick={() => setSelectedNote(note)}
-                                className="group h-full relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300"
+                                className="group h-full relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
                               >
                                 {/* Podgląd / Zdjęcie */}
                                 <div className={`h-36 w-full bg-gradient-to-br ${note.accent} p-4 flex flex-col justify-between opacity-90 transition-opacity group-hover:opacity-100`}>
@@ -552,21 +629,21 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                                   <ImageIcon className="h-8 w-8 text-white/50" />
                                 </div>
                                 
-                                <div className="flex flex-1 flex-col p-4">
-                                  <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{note.title}</h4>
+                                <div className="flex flex-1 flex-col p-4 dark:border-t-slate-800">
+                                  <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">{note.title}</h4>
                                   
-                                  <div className="mt-2 text-xs text-slate-500">Udostępniono dla: <span className="font-semibold text-slate-700">{note.sharedWith}</span></div>
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Udostępniono dla: <span className="font-semibold text-slate-700 dark:text-slate-300">{note.sharedWith}</span></div>
 
                                   <div className="mt-auto pt-4 flex flex-wrap gap-1">
                                      {note.tags.map((tag) => (
-                                       <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                                       <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                                          {tag}
                                        </span>
                                      ))}
                                   </div>
-                                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
-                                    <span className="font-semibold text-slate-700">{note.pages} str.</span>
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">{note.pages} str.</span>
                                   </div>
                                 </div>
                               </div>
@@ -593,34 +670,34 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
           {/* VIEW: UPLOAD */}
           {currentView === "upload" && (
              <div className="mx-auto max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-               <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-                 <h2 className="text-2xl font-bold text-slate-900">Udostępnij nowy dokument</h2>
-                 <p className="mt-2 text-slate-500">Prześlij notatki, skrypty lub zadania w formacie PDF i zdjęć, by podzielić się nimi ze znajomymi.</p>
+               <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10 dark:border-slate-800 dark:bg-slate-900">
+                 <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Udostępnij nowy dokument</h2>
+                 <p className="mt-2 text-slate-500 dark:text-slate-400">Prześlij notatki, skrypty lub zadania w formacie PDF i zdjęć, by podzielić się nimi ze znajomymi.</p>
                  
                  <div className="mt-8 space-y-6">
                    {/* Pole pliku */}
                    <div>
-                     <label className="mb-2 block text-sm font-medium text-slate-700">Wybierz plik do przesłania</label>
+                     <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Wybierz plik do przesłania</label>
                      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,image/*,.docx" />
                      
                      <div 
                        onClick={handleUploadClick}
                        className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-10 text-center transition-colors ${
-                         uploadFile ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-slate-100"
+                         uploadFile ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/20" : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600 dark:hover:bg-slate-800/80"
                        }`}
                      >
                        {uploadFile ? (
                          <>
-                           <File className="mb-3 h-10 w-10 text-blue-600" />
-                           <p className="text-sm font-medium text-blue-900">{uploadFile.name}</p>
-                           <p className="mt-1 text-xs text-blue-600/80">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                           <button className="mt-4 rounded-full bg-blue-100 px-4 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-200">Zmień plik</button>
+                           <File className="mb-3 h-10 w-10 text-blue-600 dark:text-blue-400" />
+                           <p className="text-sm font-medium text-blue-900 dark:text-blue-100">{uploadFile.name}</p>
+                           <p className="mt-1 text-xs text-blue-600/80 dark:text-blue-400/80">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                           <button className="mt-4 rounded-full bg-blue-100 px-4 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60">Zmień plik</button>
                          </>
                        ) : (
                          <>
-                           <UploadCloud className="mb-3 h-10 w-10 text-slate-400" />
-                           <p className="text-sm font-medium text-slate-700">Kliknij aby wybrać, lub przeciągnij plik tutaj.</p>
-                           <p className="mt-1 text-xs text-slate-500">Akceptowane formaty: PDF, JPG, PNG, DOCX (do 50MB).</p>
+                           <UploadCloud className="mb-3 h-10 w-10 text-slate-400 dark:text-slate-500" />
+                           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Kliknij aby wybrać, lub przeciągnij plik tutaj.</p>
+                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Akceptowane formaty: PDF, JPG, PNG, DOCX (do 50MB).</p>
                          </>
                        )}
                      </div>
@@ -628,24 +705,24 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
                    {/* Formularz dla pliku */}
                    {uploadFile && (
-                     <div className="animate-in fade-in slide-in-from-top-4 space-y-5 rounded-2xl border border-slate-200 p-5 bg-slate-50/50">
+                     <div className="animate-in fade-in slide-in-from-top-4 space-y-5 rounded-2xl border border-slate-200 p-5 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
                        <div>
-                         <label className="mb-1.5 block text-sm font-medium text-slate-700">Tytuł materiału</label>
+                         <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Tytuł materiału</label>
                          <input 
                            type="text" 
                            value={uploadTitle}
                            onChange={(e) => setUploadTitle(e.target.value)}
-                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400" 
                          />
                        </div>
                        
                        <div className="grid grid-cols-2 gap-5">
                          <div>
-                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Kategoria</label>
+                           <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Kategoria</label>
                            <select 
                              value={uploadCategory}
                              onChange={(e) => setUploadCategory(e.target.value)}
-                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
                            >
                              <option value="Kolokwium">Kolokwium</option>
                              <option value="Wykład">Wykład</option>
@@ -654,11 +731,11 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                            </select>
                          </div>
                          <div>
-                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Udostępnij dla</label>
+                           <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Udostępnij dla</label>
                            <select 
                              value={uploadVisibility}
                              onChange={(e) => setUploadVisibility(e.target.value)}
-                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
                            >
                              <option value="Prywatny">Prywatny</option>
                              <option value="Moja Grupa">Moja Grupa</option>
@@ -671,7 +748,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                          <button 
                            onClick={handleUploadSubmit}
                            disabled={isUploading}
-                           className="w-full flex justify-center items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-slate-800 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                           className="w-full flex justify-center items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-slate-800 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700"
                          >
                            <Upload className="h-4 w-4" />
                            {isUploading ? "Przesyłanie..." : "Rozpocznij udostępnianie"}
@@ -692,20 +769,20 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
         <>
           {/* Overlay */}
           <div 
-            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm transition-opacity" 
+            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm transition-opacity dark:bg-slate-900/60" 
             onClick={() => setSelectedNote(null)} 
           />
           {/* Drawer */}
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl transform border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-[500px] md:w-[700px] flex flex-col">
+          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl transform border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-[500px] md:w-[700px] flex flex-col dark:border-slate-800 dark:bg-slate-900">
             
             {/* Drawer Header */}
-            <div className="flex h-20 items-center justify-between border-b border-slate-100 px-6">
+            <div className="flex h-20 items-center justify-between border-b border-slate-100 px-6 dark:border-slate-800">
               <div className="flex flex-col overflow-hidden">
-                <h2 className="truncate text-lg font-semibold text-slate-900">{selectedNote.title}</h2>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
+                <h2 className="truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{selectedNote.title}</h2>
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span>Dodano: {selectedNote.updatedAt}</span>
-                  <span className="h-1 w-1 rounded-full bg-slate-300"></span>
-                  <span className="font-medium text-blue-600">{selectedNote.category}</span>
+                  <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+                  <span className="font-medium text-blue-600 dark:text-blue-400">{selectedNote.category}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2 ml-4">
@@ -713,14 +790,14 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                   href={selectedNote.url} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                   title="Otwórz w nowej karcie"
                 >
                   <ExternalLink className="h-5 w-5" />
                 </a>
                 <button 
                   onClick={() => setSelectedNote(null)}
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -728,33 +805,33 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             </div>
 
             {/* Drawer Content */}
-            <div className="flex-1 overflow-hidden bg-slate-100/50 p-2 sm:p-6">
-              <div className="h-full w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white">
+            <div className="flex-1 overflow-hidden bg-slate-100/50 p-2 sm:p-6 dark:bg-slate-900/50">
+              <div className="h-full w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white dark:border-slate-700 dark:bg-slate-900">
                 <iframe 
                   src={`${selectedNote.url}#toolbar=0`} 
-                  className="w-full h-full border-none"
+                  className="w-full h-full border-none bg-white dark:bg-slate-900"
                   title={selectedNote.title}
                 />
               </div>
             </div>
 
               {/* Drawer Footer Details */}
-            <div className="border-t border-slate-100 bg-white p-6">
+            <div className="border-t border-slate-100 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <div className="flex -space-x-2">
-                    <div className="h-8 w-8 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-xs font-bold text-blue-700">SR</div>
+                    <div className="h-8 w-8 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-xs font-bold text-blue-700 dark:border-slate-900 dark:bg-blue-900/40 dark:text-blue-300">SR</div>
                   </div>
                   <div className="text-sm">
-                    <p className="font-medium text-slate-900">Udostępnione dla:</p>
-                    <p className="text-slate-500 max-w-xs truncate" title={selectedNote.sharedWith}>{selectedNote.sharedWith}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-100">Udostępnione dla:</p>
+                    <p className="text-slate-500 max-w-xs truncate dark:text-slate-400" title={selectedNote.sharedWith}>{selectedNote.sharedWith}</p>
                   </div>
                 </div>
                 
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => setShareModalOpen(true)}
-                    className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-md shadow-slate-900/10 hover:bg-slate-800 transition"
+                    className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-md shadow-slate-900/10 hover:bg-slate-800 transition dark:bg-blue-600 dark:shadow-blue-900/20 dark:hover:bg-blue-700"
                   >
                     <Users className="h-4 w-4" />
                     Zaproś email
@@ -762,9 +839,9 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 </div>
               </div>
               
-              <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+              <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                 {selectedNote.tags.map((tag) => (
-                  <span key={tag} className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+                  <span key={tag} className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     {tag}
                   </span>
                 ))}
@@ -775,33 +852,33 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
           {/* Modal do udostępniania plików (Krok w Drawerze otwiera go) */}
           {shareModalOpen && selectedNote && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl relative">
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 dark:bg-slate-900/60">
+              <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl relative dark:bg-slate-900 dark:border dark:border-slate-800">
                 <button
                   onClick={() => setShareModalOpen(false)}
-                  className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition"
+                  className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition dark:hover:text-slate-300"
                 >
                   <X className="h-5 w-5" />
                 </button>
-                <h3 className="text-2xl font-bold text-slate-900 mb-2">Zapisz uprawnienia</h3>
-                <p className="text-sm text-slate-500 mb-6">Zaproś konkretną osobę z Twojego roku dodając jej email z domeny studenckiej.</p>
+                <h3 className="text-2xl font-bold text-slate-900 mb-2 dark:text-slate-100">Zapisz uprawnienia</h3>
+                <p className="text-sm text-slate-500 mb-6 dark:text-slate-400">Zaproś konkretną osobę z Twojego roku dodając jej email z domeny studenckiej.</p>
                 
                 <form onSubmit={handleSubmit(handleShare)}>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5 dark:text-slate-300">
                     Adres email studenta:
                   </label>
                   <input
                     type="email"
                     {...register("email")}
                     placeholder="np. 123456@stud.prz.edu.pl"
-                    className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm outline-none focus:bg-white focus:ring-2 transition-all mb-1 ${
+                    className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm outline-none focus:bg-white focus:ring-2 transition-all mb-1 dark:bg-slate-800 dark:text-slate-100 dark:focus:bg-slate-900 ${
                       errors.email
-                        ? "border-red-300 focus:border-red-500 focus:ring-red-100"
-                        : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+                        ? "border-red-300 focus:border-red-500 focus:ring-red-100 dark:border-red-500/50 dark:focus:border-red-500 dark:focus:ring-red-500/20"
+                        : "border-slate-200 focus:border-blue-500 focus:ring-blue-100 dark:border-slate-700 dark:focus:border-blue-500 dark:focus:ring-blue-500/20"
                     }`}
                   />
                   {errors.email && (
-                    <p className="text-xs text-red-500 mb-6">{errors.email.message}</p>
+                    <p className="text-xs text-red-500 mb-6 dark:text-red-400">{errors.email.message}</p>
                   )}
                   {!errors.email && <div className="mb-6"></div>}
                   
@@ -809,7 +886,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     <button
                       type="button"
                       onClick={() => setShareModalOpen(false)}
-                      className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition"
+                      className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition dark:text-slate-300 dark:hover:bg-slate-800"
                       disabled={isPending}
                     >
                       Anuluj
@@ -817,7 +894,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     <button
                       type="submit"
                       disabled={isPending}
-                      className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed dark:shadow-blue-900/20"
                     >
                       {isPending ? <Clock className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
                       Udostępnij wpis
