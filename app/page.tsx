@@ -13,7 +13,7 @@ export default async function LandingPage() {
         <div className="mx-auto flex h-28 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-white shadow-[0_8px_30px_rgba(37,99,235,0.15)] ring-1 ring-slate-200/50">
-              <Image src="/logo.png" alt="SmartNotes Logo" width={200} height={200} priority className="h-full w-full object-cover scale-[1.4] translate-y-2" />
+              <Image src="/logo.png" alt="SmartNotes Logo" width={200} height={200} priority className="h-full w-full object-contain p-2" />
             </div>
             <span className="text-4xl font-extrabold tracking-tight text-slate-950">Smart<span className="text-blue-600">Notes</span></span>
           </div>
@@ -263,7 +263,7 @@ export default async function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between">
           <div className="flex items-center gap-3 mb-6 md:mb-0 grayscale opacity-80 transition-all hover:grayscale-0 hover:opacity-100">
             <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/50">
-               <Image src="/logo.png" alt="SmartNotes Logo" width={160} height={160} className="h-full w-full object-cover scale-[1.4] translate-y-1.5" />
+               <Image src="/logo.png" alt="SmartNotes Logo" width={160} height={160} className="h-full w-full object-contain p-1.5" />
             </div>
             <span className="text-2xl font-bold tracking-tight text-slate-950">Smart<span className="text-blue-600">Notes</span></span>
           </div>

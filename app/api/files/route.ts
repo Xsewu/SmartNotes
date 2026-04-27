@@ -170,6 +170,8 @@ export async function POST(request: NextRequest) {
 
     const title = (formData.get("title") as string) || file.name;
     const categoryName = (formData.get("category") as string) || "Inne";
+    const subjectIdStr = formData.get("subjectId") as string;
+    const subjectId = subjectIdStr ? parseInt(subjectIdStr, 10) : undefined;
     const visibilityStr = formData.get("visibility") as string;
 
     let visibility: Visibility = Visibility.PRIVATE;
@@ -218,6 +220,7 @@ export async function POST(request: NextRequest) {
         visibility,
         pages,
         authorId: session.user.id,
+        subjectId,
         tags: {
           create: [{ tagId: tagRecord.id }],
         },

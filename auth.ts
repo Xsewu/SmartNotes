@@ -78,6 +78,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           session.user.studyGroup = dbUser.studyGroup;
           session.user.yearOfStudy = dbUser.yearOfStudy;
           session.user.role = dbUser.role;
+          session.user.image = dbUser.image;
         }
       }
       return session;

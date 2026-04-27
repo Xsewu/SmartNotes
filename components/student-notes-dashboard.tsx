@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { signOut } from "next-auth/react";
-import { useDeferredValue, useEffect, useMemo, useState, useRef, useTransition, useOptimistic } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useRef, useTransition, useOptimistic, startTransition } from "react";
 import {
   Search,
   Share2,
@@ -20,9 +21,15 @@ import {
   X,
   ExternalLink,
   LayoutGrid,
-  List
+  List,
+  Bookmark,
+  Star,
+  MessageSquare,
+  Send,
+  MoreVertical
 } from "lucide-react";
-import { getDashboardFiles, handleShareUser } from "@/app/actions/files";
+import { getSubjects } from "@/app/actions/subjects";
+import { getDashboardFiles, handleShareUser, toggleFavorite, rateFile, getFileComments, addComment, getUserStats } from "@/app/actions/files";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -46,12 +53,18 @@ interface Note {
   id: string;
   title: string;
   category: Category;
+  subject: string | null;
+  subjectId: number | null;
   tags: string[];
   updatedAt: string;
   pages: number;
   sharedWith: string;
   accent: string;
   url: string;
+  isFavorite: boolean;
+  favoritesCount: number;
+  commentsCount: number;
+  rating: number;
 }
 
 const categories: Array<"Wszystkie" | Category> = ["Wszystkie", "Kolokwium", "Wykład", "Projekt", "Inne"];
@@ -85,14 +98,25 @@ function NoteRow({
       className="group w-full flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-3 cursor-pointer transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/80"
     >
       <div className="flex items-center gap-4 min-w-0">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${note.accent} text-white shadow-sm`}>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${note.accent} text-white shadow-sm relative`}>
           <FileText className="h-5 w-5 opacity-90" />
+          {note.isFavorite && (
+             <div className="absolute -top-1 -right-1 bg-yellow-400 text-white rounded-full p-0.5 shadow-sm">
+                <Bookmark className="h-2.5 w-2.5 fill-current" />
+             </div>
+          )}
         </div>
         
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2">
             <h4 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{note.title}</h4>
             <span className="shrink-0 text-[11px] text-slate-400 font-medium dark:text-slate-500">{note.updatedAt}</span>
+            
+            <div className="hidden md:flex items-center gap-1 text-[11px] font-medium text-yellow-600 dark:text-yellow-500 ml-1">
+              <Star className="h-3 w-3 fill-current" />
+              {note.rating > 0 ? note.rating : "—"}
+            </div>
+
             <div className="hidden sm:flex flex-wrap items-center gap-1.5 ml-2">
               <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 {note.category}
@@ -104,8 +128,9 @@ function NoteRow({
               ))}
             </div>
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500 truncate dark:text-slate-400">
-            Udostępniono: {note.sharedWith}
+          <div className="mt-0.5 flex items-center gap-3 text-[11px] text-slate-500 truncate dark:text-slate-400">
+            <span>Udostępniono: {note.sharedWith}</span>
+            <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" /> {note.commentsCount}</span>
           </div>
         </div>
       </div>
@@ -126,16 +151,20 @@ function NoteRow({
 
 import { ThemeToggle } from "@/components/theme-toggle";
 
-export default function StudentNotesDashboard({ user }: { user?: { email?: string | null } }) {
+export default function StudentNotesDashboard({ user }: { user?: { email?: string | null, image?: string | null } }) {
   const [currentView, setCurrentView] = useState<ViewState>("dashboard");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<"Wszystkie" | Category>("Wszystkie");
   
+  const [subjects, setSubjects] = useState<{ id: number; name: string }[]>([]);
+  const [activeSubject, setActiveSubject] = useState<number | "Wszystkie">("Wszystkie");
+
   const [uploadFile, setUploadFile] = useState<globalThis.File | null>(null);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState("Kolokwium");
+  const [uploadSubjectId, setUploadSubjectId] = useState("");
   const [uploadVisibility, setUploadVisibility] = useState("Prywatny");
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +181,102 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
+
+  // Nowe stany do obsługi ocen i komentarzy w Drawerze
+  const [drawerTab, setDrawerTab] = useState<"document" | "discussion">("document");
+  const [comments, setComments] = useState<{ id: string; content: string; authorEmail: string; authorImage: string | null; createdAt: string; isAuthor: boolean }[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  
+  const [userStats, setUserStats] = useState({ uploaded: 0, saved: 0, activity: "Brak", newFiles: 0 });
+
+  // Funkcja ładująca komentarze gdy otwieramy plik
+  useEffect(() => {
+    if (selectedNote && drawerTab === "discussion") {
+      setIsLoadingComments(true);
+      getFileComments(selectedNote.id)
+        .then((data) => setComments(data))
+        .catch(() => toast.error("Nie udało się załadować komentarzy."))
+        .finally(() => setIsLoadingComments(false));
+    }
+  }, [selectedNote, drawerTab]);
+
+  const handleToggleFavorite = async () => {
+    if (!selectedNote) return;
+    
+    // Optimistic update
+    const previousState = selectedNote.isFavorite;
+    const previousCount = selectedNote.favoritesCount;
+    
+    const updatedNote = { 
+      ...selectedNote, 
+      isFavorite: !previousState, 
+      favoritesCount: previousState ? previousCount - 1 : previousCount + 1 
+    };
+    
+    startTransition(() => {
+      addOptimisticNote(updatedNote);
+    });
+    setSelectedNote(updatedNote);
+
+    try {
+      const res = await toggleFavorite(selectedNote.id);
+      // Ensure sync
+      if (res.isFavorite !== updatedNote.isFavorite) {
+        throw new Error("Sync mismatch");
+      }
+    } catch {
+      toast.error("Nie udało się zaktualizować ulubionych.");
+      const reverted = { ...selectedNote, isFavorite: previousState, favoritesCount: previousCount };
+      startTransition(() => {
+        addOptimisticNote(reverted);
+      });
+      setSelectedNote(reverted);
+    }
+  };
+
+  const handleRate = async (value: number) => {
+    if (!selectedNote) return;
+    
+    try {
+      await rateFile(selectedNote.id, value);
+      toast.success(`Oceniono na ${value} gwiazdki!`);
+      // Zamiast optimistycznego wyliczenia, moglibyśmy odświeżyć wszystkie notatki
+      fetchNotes();
+      
+      const newNote = { ...selectedNote, rating: value };
+      startTransition(() => {
+        addOptimisticNote(newNote);
+      });
+      setSelectedNote(newNote);
+    } catch {
+      toast.error("Błąd podczas oceniania.");
+    }
+  };
+
+  const handlePostComment = async () => {
+    if (!selectedNote || !newComment.trim()) return;
+    setIsSubmittingComment(true);
+    try {
+      await addComment(selectedNote.id, newComment);
+      setNewComment("");
+      toast.success("Dodano komentarz!");
+      
+      const updatedNote = { ...selectedNote, commentsCount: selectedNote.commentsCount + 1 };
+      startTransition(() => {
+        addOptimisticNote(updatedNote);
+      });
+      setSelectedNote(updatedNote);
+
+      const data = await getFileComments(selectedNote.id);
+      setComments(data);
+    } catch {
+      toast.error("Nie udało się dodać komentarza.");
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -188,6 +313,10 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
       setIsLoading(true);
       const data = await getDashboardFiles();
       setNotes(data as Note[]);
+      const stats = await getUserStats();
+      setUserStats(stats);
+      const subjs = await getSubjects();
+      setSubjects(subjs);
     } catch (error) {
       console.error("Failed to fetch notes", error);
       toast.error("Nie udało się pobrać notatek.");
@@ -233,10 +362,11 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   const filteredNotes = useMemo(() => {
     return optimisticNotes.filter((note) => {
       const categoryMatches = activeCategory === "Wszystkie" || note.category === activeCategory;
-      const queryMatches = (note.title + note.category + note.tags.join(" ")).toLowerCase().includes(deferredQuery.toLowerCase());
-      return categoryMatches && queryMatches;
+      const subjectMatches = activeSubject === "Wszystkie" || note.subjectId === activeSubject;
+      const queryMatches = (note.title + note.category + note.tags.join(" ") + (note.subject || "")).toLowerCase().includes(deferredQuery.toLowerCase());
+      return categoryMatches && subjectMatches && queryMatches;
     });
-  }, [activeCategory, deferredQuery, optimisticNotes]);
+  }, [activeCategory, activeSubject, deferredQuery, optimisticNotes]);
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -259,6 +389,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
       formData.append("title", uploadTitle);
       formData.append("category", uploadCategory);
       formData.append("visibility", uploadVisibility);
+      if (uploadSubjectId) formData.append("subjectId", uploadSubjectId);
 
       const res = await fetch("/api/files", {
         method: "POST",
@@ -274,6 +405,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
       
       setUploadFile(null);
       setUploadTitle("");
+      setUploadSubjectId("");
       toast.success("Plik został pomyślnie udostępniony!");
       setCurrentView("my-notes");
     } catch (err) {
@@ -293,11 +425,11 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50 font-sans">
       {/* Sidebar */}
-      <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-800 md:flex">
-        <div className="flex h-20 items-center px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-              <FileText className="h-5 w-5" />
+      <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-800 md:flex shrink-0">
+        <div className="flex h-20 items-center px-6 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-[0_4px_15px_rgba(37,99,235,0.15)] ring-1 ring-slate-200/50 dark:bg-slate-800 dark:ring-slate-700/50">
+              <Image src="/logo.png" alt="SmartNotes Logo" width={80} height={80} priority className="h-full w-full object-contain p-1" />
             </div>
             <span className="text-xl font-bold tracking-tight">SmartNotes</span>
           </div>
@@ -330,9 +462,13 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             onClick={() => setUserMenuOpen(!userMenuOpen)}
             className="w-full text-left flex items-center gap-3 rounded-xl hover:bg-slate-50 p-2 transition-colors dark:hover:bg-slate-800"
           >
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm dark:bg-blue-900/50 dark:border-blue-800 dark:text-blue-400">
-              {user?.email?.[0]?.toUpperCase() || "U"}
-            </div>
+            {user?.image ? (
+              <img src={user.image} alt="Avatar" className="h-10 w-10 rounded-full object-cover shadow-sm border border-slate-200 dark:border-slate-700" />
+            ) : (
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm dark:bg-blue-900/50 dark:border-blue-800 dark:text-blue-400">
+                {user?.email?.[0]?.toUpperCase() || "U"}
+              </div>
+            )}
             <div className="flex-1 truncate">
               <p className="truncate text-sm font-medium text-slate-950 dark:text-slate-200">{user?.email || "Nie zalogowano"}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">Student</p>
@@ -394,9 +530,13 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             <div className="relative md:hidden" ref={headerMenuRef}>
               <button 
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm overflow-hidden"
               >
-                {user?.email?.[0]?.toUpperCase() || "U"}
+                {user?.image ? (
+                  <img src={user.image} alt="Avatar" className="h-full w-full object-cover" />
+                ) : (
+                  user?.email?.[0]?.toUpperCase() || "U"
+                )}
               </button>
               {userMenuOpen && (
                 <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 animate-in fade-in slide-in-from-top-2">
@@ -434,7 +574,9 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
               <div className="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-sm sm:p-10 relative overflow-hidden dark:border-slate-800/80 dark:bg-slate-900">
                 <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-blue-100/50 blur-3xl dark:bg-blue-900/20"></div>
                 <div className="relative z-10 max-w-2xl">
-                  <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Cześć! Masz 12 nowych plików na swoim roku.</h2>
+                  <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+                    Cześć! Masz {userStats.newFiles} {userStats.newFiles === 1 ? 'nowy plik' : (userStats.newFiles >= 2 && userStats.newFiles <= 4 ? 'nowe pliki' : 'nowych plików')} na swoim roku.
+                  </h2>
                   <p className="mt-3 text-lg text-slate-600 dark:text-slate-400">
                     Studenci z Twojej grupy udostępnili w tym tygodniu przydatne materiały. Zobacz najnowsze skrypty i przykładowe zadania z kolokwiów.
                   </p>
@@ -457,21 +599,21 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                       <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Udostępnione pliki</span>
                       <UploadCloud className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">8</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">{userStats.uploaded}</span>
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-                      <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Pobrane materiały</span>
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Zapisane materiały</span>
                       <FileUp className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">42</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">{userStats.saved}</span>
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
                       <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Aktywność w grupie</span>
                       <Users className="h-5 w-5" />
                     </div>
-                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">Wysoka</span>
+                    <span className="mt-4 block text-3xl font-bold text-slate-900 dark:text-slate-100">{userStats.activity}</span>
                   </div>
                 </div>
               </div>
@@ -502,12 +644,24 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                       
                       <div className="flex flex-1 flex-col p-4 dark:border-t-slate-800">
                         <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">{note.title}</h4>
-                        <div className="mt-auto pt-4 flex flex-wrap gap-1">
-                           {note.tags.slice(0, 2).map((tag) => (
-                             <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                               {tag}
-                             </span>
-                           ))}
+                        <div className="mt-auto pt-4 flex items-center justify-between">
+                           <div className="flex flex-wrap gap-1">
+                             {note.tags.slice(0, 2).map((tag) => (
+                               <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                 {tag}
+                               </span>
+                             ))}
+                           </div>
+                           <div className="flex items-center gap-2 text-xs font-semibold">
+                             <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-500">
+                               <Star className="h-3 w-3 fill-current" />
+                               {note.rating > 0 ? note.rating : "—"}
+                             </div>
+                             <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                               <MessageSquare className="h-3 w-3" />
+                               {note.commentsCount}
+                             </div>
+                           </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                           <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
@@ -525,20 +679,33 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
           {currentView === "my-notes" && (
              <div className="mx-auto max-w-6xl animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex flex-wrap gap-2">
-                    {categories.map((category) => (
-                      <button
-                        key={category}
-                        onClick={() => setActiveCategory(category)}
-                        className={`rounded-full border px-5 py-2.5 text-sm font-medium transition-all ${
-                          activeCategory === category
-                            ? "border-slate-950 bg-slate-950 text-white shadow-sm dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
-                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-700"
-                        }`}
-                      >
-                        {category}
-                      </button>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((category) => (
+                        <button
+                          key={category}
+                          onClick={() => setActiveCategory(category)}
+                          className={`rounded-full border px-5 py-2.5 text-sm font-medium transition-all ${
+                            activeCategory === category
+                              ? "border-slate-950 bg-slate-950 text-white shadow-sm dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <select
+                      value={activeSubject}
+                      onChange={(e) => setActiveSubject(e.target.value === "Wszystkie" ? "Wszystkie" : Number(e.target.value))}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-slate-950 focus:ring-1 focus:ring-slate-950 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-600 dark:focus:border-slate-100 dark:focus:ring-slate-100"
+                    >
+                      <option value="Wszystkie">Wszystkie przedmioty</option>
+                      {subjects.map((subj) => (
+                        <option key={subj.id} value={subj.id}>{subj.name}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="flex rounded-lg bg-slate-100 p-1 shadow-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800">
@@ -634,12 +801,25 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                                   
                                   <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Udostępniono dla: <span className="font-semibold text-slate-700 dark:text-slate-300">{note.sharedWith}</span></div>
 
-                                  <div className="mt-auto pt-4 flex flex-wrap gap-1">
-                                     {note.tags.map((tag) => (
-                                       <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                                         {tag}
-                                       </span>
-                                     ))}
+                                  <div className="mt-auto pt-4 flex items-center justify-between">
+                                     <div className="flex flex-wrap gap-1">
+                                       {note.tags.slice(0, 2).map((tag) => (
+                                         <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                           {tag}
+                                         </span>
+                                       ))}
+                                     </div>
+                                     <div className="flex items-center gap-2 text-xs font-semibold">
+                                       {note.isFavorite && <Bookmark className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />}
+                                       <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-500">
+                                         <Star className="h-3 w-3 fill-current" />
+                                         {note.rating > 0 ? note.rating : "—"}
+                                       </div>
+                                       <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                         <MessageSquare className="h-3 w-3" />
+                                         {note.commentsCount}
+                                       </div>
+                                     </div>
                                   </div>
                                   <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
@@ -716,7 +896,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                          />
                        </div>
                        
-                       <div className="grid grid-cols-2 gap-5">
+                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                          <div>
                            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Kategoria</label>
                            <select 
@@ -728,6 +908,19 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                              <option value="Wykład">Wykład</option>
                              <option value="Projekt">Projekt</option>
                              <option value="Inne">Inne</option>
+                           </select>
+                         </div>
+                         <div>
+                           <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Przedmiot</label>
+                           <select 
+                             value={uploadSubjectId}
+                             onChange={(e) => setUploadSubjectId(e.target.value)}
+                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                           >
+                             <option value="">Wybierz przedmiot...</option>
+                             {subjects.map((subj) => (
+                               <option key={subj.id} value={subj.id}>{subj.name}</option>
+                             ))}
                            </select>
                          </div>
                          <div>
@@ -776,8 +969,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
           <div className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl transform border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-[500px] md:w-[700px] flex flex-col dark:border-slate-800 dark:bg-slate-900">
             
             {/* Drawer Header */}
-            <div className="flex h-20 items-center justify-between border-b border-slate-100 px-6 dark:border-slate-800">
-              <div className="flex flex-col overflow-hidden">
+            <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-6 dark:border-slate-800">
+              <div className="flex flex-col overflow-hidden w-full max-w-sm">
                 <h2 className="truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{selectedNote.title}</h2>
                 <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span>Dodano: {selectedNote.updatedAt}</span>
@@ -785,7 +978,19 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                   <span className="font-medium text-blue-600 dark:text-blue-400">{selectedNote.category}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 ml-4">
+              <div className="flex items-center gap-2 ml-4 shrink-0">
+                <button
+                  onClick={handleToggleFavorite}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+                    selectedNote.isFavorite 
+                      ? "text-yellow-500 bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-500/10 dark:hover:bg-yellow-500/20" 
+                      : "text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800"
+                  }`}
+                  title={selectedNote.isFavorite ? "Usuń z zapisanych" : "Zapisz do ulubionych"}
+                >
+                  <Bookmark className={`h-5 w-5 ${selectedNote.isFavorite ? "fill-current" : ""}`} />
+                </button>
+                <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
                 <a 
                   href={selectedNote.url} 
                   target="_blank" 
@@ -804,19 +1009,123 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
               </div>
             </div>
 
+            {/* Drawer Tabs */}
+            <div className="flex justify-center gap-2 py-3 bg-white border-b border-slate-100 dark:bg-slate-900 dark:border-slate-800 shrink-0">
+                <button
+                   onClick={() => setDrawerTab("document")}
+                   className={`px-5 py-2 text-sm font-medium rounded-full transition-colors ${
+                     drawerTab === "document" 
+                       ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" 
+                       : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                   }`}
+                >Dokument PDF</button>
+                <button
+                   onClick={() => setDrawerTab("discussion")}
+                   className={`px-5 py-2 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+                     drawerTab === "discussion" 
+                       ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" 
+                       : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                   }`}
+                >
+                  Komentarze i oceny 
+                  <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] items-center justify-center ${drawerTab === 'discussion' ? 'bg-white/20' : 'bg-slate-300/50 dark:bg-slate-700'}`}>{selectedNote.commentsCount}</span>
+                </button>
+            </div>
+
             {/* Drawer Content */}
-            <div className="flex-1 overflow-hidden bg-slate-100/50 p-2 sm:p-6 dark:bg-slate-900/50">
-              <div className="h-full w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white dark:border-slate-700 dark:bg-slate-900">
-                <iframe 
-                  src={`${selectedNote.url}#toolbar=0`} 
-                  className="w-full h-full border-none bg-white dark:bg-slate-900"
-                  title={selectedNote.title}
-                />
-              </div>
+            <div className="flex-1 overflow-hidden bg-slate-100/50 flex flex-col p-0 sm:p-4 dark:bg-slate-900/50">
+              {drawerTab === "document" ? (
+                <div className="h-full w-full sm:rounded-xl overflow-hidden border-0 sm:border border-slate-200 shadow-sm bg-white dark:border-slate-700 dark:bg-slate-900">
+                  <iframe 
+                    src={`${selectedNote.url}#toolbar=0`} 
+                    className="w-full h-full border-none bg-white dark:bg-slate-900"
+                    title={selectedNote.title}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col h-full bg-white sm:rounded-xl border-y sm:border-x border-slate-200 shadow-sm overflow-hidden dark:border-slate-700 dark:bg-slate-900">
+                  <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex flex-col gap-3">
+                    <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-widest">Oceń materiał</h3>
+                    <div className="flex items-center gap-2">
+                       {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            onClick={() => handleRate(star)}
+                            className="group relative h-10 w-10 hover:-translate-y-1 transition-transform"
+                          >
+                            <Star className={`h-8 w-8 mx-auto ${(selectedNote.rating || 0) >= star ? "fill-yellow-400 text-yellow-400" : "fill-slate-100 text-slate-300 dark:fill-slate-800 dark:text-slate-700 group-hover:fill-yellow-200 group-hover:text-yellow-300 dark:group-hover:fill-yellow-500/20 dark:group-hover:text-yellow-600"}`} />
+                          </button>
+                       ))}
+                       <div className="ml-3 text-sm font-semibold text-slate-900 dark:text-slate-100">{selectedNote.rating > 0 ? `${selectedNote.rating} / 5` : "Brak ocen"}</div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto p-5 pb-20 scroll-smooth space-y-5">
+                    {isLoadingComments ? (
+                       <div className="flex justify-center py-10 opacity-50"><Clock className="h-6 w-6 animate-spin text-slate-400" /></div>
+                    ) : comments.length === 0 ? (
+                       <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                          <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                          <p className="text-sm">Nikt jeszcze nie skomentował tej notatki.</p>
+                          <p className="text-xs mt-1">Bądź pierwszy!</p>
+                       </div>
+                    ) : (
+                       comments.map((comment) => (
+                          <div key={comment.id} className={`flex gap-3 ${comment.isAuthor ? "flex-row-reverse" : "flex-row"}`}>
+                            {comment.authorImage ? (
+                               <img src={comment.authorImage} alt="" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full object-cover border border-slate-200 shadow-sm dark:border-slate-800" />
+                            ) : (
+                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-900/50 dark:text-blue-400">
+                                  {comment.authorEmail[0].toUpperCase()}
+                               </div>
+                            )}
+                            <div className={`flex flex-col max-w-[75%] ${comment.isAuthor ? "items-end" : "items-start"}`}>
+                               <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1.5">
+                                  <span>{comment.authorEmail}</span>
+                                  <span>&bull;</span>
+                           <span>{new Date(comment.createdAt).toLocaleDateString("pl-PL")}</span>
+                               </div>
+                               <div className={`rounded-2xl px-4 py-2.5 text-sm ${
+                                  comment.isAuthor 
+                                    ? "bg-blue-600 text-white shadow-sm shadow-blue-600/10 rounded-tr-sm" 
+                                    : "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 rounded-tl-sm"
+                               }`}>
+                                  {comment.content}
+                               </div>
+                            </div>
+                          </div>
+                       ))
+                    )}
+                  </div>
+                  
+                  <div className="p-4 border-t border-slate-100 bg-slate-50/50 mt-auto flex gap-2 items-end dark:border-slate-800 dark:bg-slate-900/50 relative">
+                     <textarea
+                       placeholder="Napisz komentarz..."
+                       value={newComment}
+                       onChange={(e) => setNewComment(e.target.value)}
+                       onKeyDown={(e) => {
+                         if (e.key === "Enter" && !e.shiftKey) {
+                           e.preventDefault();
+                           handlePostComment();
+                         }
+                       }}
+                       rows={2}
+                       className="flex-1 resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-600"
+                     />
+                     <button
+                       onClick={handlePostComment}
+                       disabled={isSubmittingComment || !newComment.trim()}
+                       className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
+                     >
+                       {isSubmittingComment ? <Clock className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 ml-0.5" />}
+                     </button>
+                  </div>
+                </div>
+              )}
             </div>
 
               {/* Drawer Footer Details */}
-            <div className="border-t border-slate-100 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+            <div className="shrink-0 border-t border-slate-100 bg-white p-5 lg:p-6 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <div className="flex -space-x-2">

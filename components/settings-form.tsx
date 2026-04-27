@@ -1,15 +1,38 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { Lock, ArrowLeft, Loader2, User as UserIcon } from "lucide-react";
+import { useState, useTransition, useRef } from "react";
+import { Lock, ArrowLeft, Loader2, User as UserIcon, Upload, ImageIcon, ImagePlus } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { changePassword } from "@/app/actions/settings";
+import { uploadAvatar } from "@/app/actions/user";
 import { useRouter } from "next/navigation";
 
 export default function SettingsForm({ user }: { user: any }) {
   const [isPending, startTransition] = useTransition();
+  const [isUploading, startUploadTransition] = useTransition();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    startUploadTransition(async () => {
+      try {
+        const res = await uploadAvatar(formData);
+        if (res.success) {
+          toast.success("Zaktualizowano zdjęcie profilowe!");
+          router.refresh();
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Błąd podczas przesyłania zdjęcia.");
+      }
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -46,14 +69,57 @@ export default function SettingsForm({ user }: { user: any }) {
       <div className="space-y-6">
         {/* Profil Section */}
         <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm overflow-hidden dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-4 border-b border-slate-100 pb-6 mb-6 dark:border-slate-800">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold border border-blue-200 dark:border-blue-900 dark:bg-blue-900/40 dark:text-blue-300">
-              {user?.email?.[0]?.toUpperCase() || "U"}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6 mb-6 dark:border-slate-800">
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleAvatarUpload} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                {user?.image ? (
+                  <img src={user.image} alt="Avatar" className="h-14 w-14 rounded-full object-cover border border-slate-200 shadow-sm dark:border-slate-700" />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold border border-blue-200 dark:border-blue-900 dark:bg-blue-900/40 dark:text-blue-300 text-lg">
+                    {user?.email?.[0]?.toUpperCase() || "U"}
+                  </div>
+                )}
+                
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                  title="Zmień zdjęcie"
+                >
+                  {isUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />}
+                </button>
+              </div>
+              
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Profil głównego konta</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{user?.email}</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Profil głównego konta</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{user?.email}</p>
-            </div>
+            
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex items-center gap-2 text-sm font-medium text-slate-600 bg-slate-100 px-4 py-2 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Przesyłanie...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Zmień zdjęcie
+                </>
+              )}
+            </button>
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
