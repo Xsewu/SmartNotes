@@ -28,8 +28,8 @@ export default function SettingsForm({ user }: { user: any }) {
           toast.success("Zaktualizowano zdjęcie profilowe!");
           router.refresh();
         }
-      } catch (err: any) {
-        toast.error(err.message || "Błąd podczas przesyłania zdjęcia.");
+      } catch (error: unknown) {
+        toast.error(error instanceof Error ? error.message : "Błąd podczas przesyłania zdjęcia.");
       }
     });
   };
@@ -127,7 +127,7 @@ export default function SettingsForm({ user }: { user: any }) {
               <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Rola</label>
               <div className="flex w-full items-center rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
                 <UserIcon className="mr-2 h-4 w-4 text-slate-400 dark:text-slate-500" />
-                {user?.role === "ADMIN" ? "Administrator" : "Student"}
+                {user?.role === "ADMIN" ? "Administrator" : user?.role === "YEAR_LEADER" ? "Starosta roku" : user?.role === "LAB_LEADER" ? "Starosta grupy" : "Student"}
               </div>
             </div>
             <div>
@@ -149,6 +149,16 @@ export default function SettingsForm({ user }: { user: any }) {
               </div>
             </div>
           </div>
+          {user && (user.role === "ADMIN" || user.role === "YEAR_LEADER" || user.role === "LAB_LEADER") && (
+            <div className="mt-4">
+              <a
+                href="/admin"
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                Zarządzaj grupami
+              </a>
+            </div>
+          )}
         </section>
 
         {/* Change Password Section */}

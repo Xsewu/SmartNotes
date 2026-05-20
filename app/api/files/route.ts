@@ -1,239 +1,145 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../lib/db/prisma";
-import { Visibility } from "../../../app/generated/prisma/client";
+import { randomUUID } from "crypto";
 import { auth } from "@/auth";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
-import { v4 as uuidv4 } from "uuid";
-// @ts-ignore
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-export interface GetFilesOptions {
-  /** The ID of the requesting user. */
-  userId: string;
-  /** Optional tag filter (e.g. "egzamin"). */
-  tag?: string;
-  /** Optional free-text search on file name. */
-  search?: string;
-  /** Page number (1-based). Defaults to 1. */
-  page?: number;
-  /** Items per page. Defaults to 20. */
-  pageSize?: number;
-}
-
-/**
- * Returns all files that `userId` is allowed to see.
- *
- * Access rules (OR-combined):
- *  1. The user is the file author (owns the file).
- *  2. The file is directly shared with the user via SharePermission.recipientId.
- *  3. The file has GROUP/YEAR visibility (global audience bucket).
- *
- * Prisma performs the necessary JOINs so we never load data for files the
- * user cannot access.
- */
-export async function getAccessibleFiles(options: GetFilesOptions) {
-  const { userId, tag, search, page = 1, pageSize = 20 } = options;
-
-  // 1. Resolve the requesting user to get their group / year for the JOIN.
-  const requestingUser = await prisma.user.findUniqueOrThrow({
-    where: { id: userId },
-    select: { id: true, studyGroup: true, yearOfStudy: true },
-  });
-
-  const skip = (page - 1) * pageSize;
-
-  const [files, total] = await Promise.all([
-    prisma.file.findMany({
-      where: buildAccessFilter(requestingUser, tag, search),
-      include: {
-        author: {
-          select: { id: true, email: true, studentIndex: true, studyGroup: true },
-        },
-        tags: { include: { tag: true } },
-        sharePermissions: true,
-      },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: pageSize,
-    }),
-    prisma.file.count({
-      where: buildAccessFilter(requestingUser, tag, search),
-    }),
-  ]);
-
-  return {
-    files,
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
-    },
-  };
-}
-
-// ─── Helper ──────────────────────────────────────────────────────────────────
-
-function buildAccessFilter(
-  user: { id: string; studyGroup: string | null; yearOfStudy: number | null },
-  tag?: string,
-  search?: string
-) {
-  return {
-    AND: [
-      // Optional tag filter
-      ...(tag
-        ? [
-            {
-              tags: {
-                some: {
-                  tag: { name: { equals: tag, mode: "insensitive" as const } },
-                },
-              },
-            },
-          ]
-        : []),
-      // Optional name search
-      ...(search
-        ? [{ title: { contains: search, mode: "insensitive" as const } }]
-        : []),
-      // Visibility / access-control filter
-      {
-        OR: [
-          // Rule 1 – author
-          { authorId: user.id },
-          // Rule 2 – direct user share
-          {
-            sharePermissions: {
-              some: {
-                recipientId: user.id,
-              },
-            },
-          },
-          // Rule 3 – broadcast-style visibility buckets
-          { visibility: Visibility.GROUP },
-          { visibility: Visibility.YEAR },
-        ],
-      },
-    ],
-  };
-}
-
-// ─── Next.js Route Handler ────────────────────────────────────────────────────
-
-export async function GET(request: NextRequest) {
-  try {
-    const session = await auth();
-    if (!session || !session.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const userId = session.user.id;
-
-    const { searchParams } = new URL(request.url);
-
-    const tag = searchParams.get("tag") ?? undefined;
-    const search = searchParams.get("search") ?? undefined;
-    const page = Number(searchParams.get("page") ?? "1");
-    const pageSize = Number(searchParams.get("pageSize") ?? "20");
-
-    const result = await getAccessibleFiles({
-      userId,
-      tag,
-      search,
-      page,
-      pageSize,
-    });
-
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("[GET /api/files]", error);
-    return NextResponse.json(
-      { error: "Internal server error." },
-      { status: 500 }
-    );
-  }
-}
+// Leniwa inicjalizacja klienta Supabase
+const getSupabase = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) throw new Error("Brak kluczy Supabase w środowisku (env).");
+  return createClient(supabaseUrl, supabaseKey);
+};
 
 export async function POST(request: NextRequest) {
   try {
+    // 1. Sprawdzenie sesji (NextAuth)
     const session = await auth();
-    if (!session || !session.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Nieautoryzowany dostęp" }, { status: 401 });
     }
 
+    // 2. Odczytanie danych z formularza
     const formData = await request.formData();
-    const file = formData.get("file") as File | null;
+    const file = formData.get("file") as File;
+    const title = formData.get("title") as string;
+    const category = formData.get("category") as string;
+    const visibilityInput = formData.get("visibility") as string;
+    const subjectIdInput = formData.get("subjectId") as string;
+
     if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+      return NextResponse.json({ error: "Brak pliku" }, { status: 400 });
     }
 
-    const title = (formData.get("title") as string) || file.name;
-    const categoryName = (formData.get("category") as string) || "Inne";
-    const subjectIdStr = formData.get("subjectId") as string;
-    const subjectId = subjectIdStr ? parseInt(subjectIdStr, 10) : undefined;
-    const visibilityStr = formData.get("visibility") as string;
+    const supabaseAdmin = getSupabaseAdminClient();
 
-    let visibility: Visibility = Visibility.PRIVATE;
-    if (visibilityStr === "Moja Grupa") visibility = Visibility.GROUP;
-    if (visibilityStr === "Cały Rocznik") visibility = Visibility.YEAR;
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    const fileId = uuidv4();
-
-    // Save locally to an 'uploads' directory, OUTSIDE of the 'public' folder
-    const uploadDir = join(process.cwd(), "uploads");
-    await mkdir(uploadDir, { recursive: true });
-
-    const filePath = join(uploadDir, fileId);
-
-    await writeFile(filePath, buffer);
-
-    let pages = 1;
-    try {
-      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-        const pdfData = await pdfParse(buffer);
-        pages = pdfData.numpages || 1;
-      }
-    } catch (err) {
-      console.warn("Nie udalo sie zliczyc stron PDF:", err);
-    }
-
-    // The URL points to our new authenticated endpoint!
-    const fileUrl = `/api/files/${fileId}`;
-
-    // Upsert Tag
-    const tagRecord = await prisma.tag.upsert({
-      where: { name: categoryName },
-      update: {},
-      create: { name: categoryName },
-    });
-
-    const newFile = await prisma.file.create({
-      data: {
-        id: fileId,
-        title,
-        url: fileUrl,
-        format: file.type || "application/octet-stream",
-        visibility,
-        pages,
-        authorId: session.user.id,
-        subjectId,
-        tags: {
-          create: [{ tagId: tagRecord.id }],
+    const { data: user, error: userError } = await supabaseAdmin
+      .from("User")
+      .upsert(
+        {
+          id: session.user.id,
+          email: session.user.email?.toLowerCase() ?? session.user.id,
+            updatedAt: new Date().toISOString(),
         },
-      },
-    });
+        { onConflict: "id" }
+      )
+      .select("id, email")
+      .single();
+
+    if (userError || !user) {
+      console.error("User sync error:", userError);
+      return NextResponse.json({ error: "Nie udało się zsynchronizować użytkownika" }, { status: 500 });
+    }
+
+    // 4. Wgrywanie pliku do Supabase Storage
+    const fileBuffer = await file.arrayBuffer();
+    const fileExt = file.name.split('.').pop() || "unknown";
+    // Generowanie unikalnej nazwy pliku aby uniknąć nadpisywania
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+    const supabase = getSupabase();
+
+    const { error: storageError } = await supabase.storage
+      .from("uploads")
+      .upload(fileName, fileBuffer, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    if (storageError) {
+      console.error("Supabase Storage Error:", storageError);
+      return NextResponse.json({ error: "Błąd podczas wgrywania pliku do Storage" }, { status: 500 });
+    }
+
+    // 5. Pobranie publicznego URL wgranego pliku
+    const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(fileName);
+
+    // 6. Mapowanie wartości widoczności dla typu ENUM "Visibility" z Prismy
+      const visibilityMap: Record<string, "PRIVATE" | "DIRECT" | "GROUP" | "YEAR"> = {
+        PRIVATE: "PRIVATE",
+        DIRECT: "DIRECT",
+        GROUP: "GROUP",
+        YEAR: "YEAR",
+        Prywatny: "PRIVATE",
+        "Wybrani użytkownicy": "DIRECT",
+        "Moja Grupa": "GROUP",
+        "Cały Rocznik": "YEAR",
+      };
+
+      const visibility = visibilityMap[visibilityInput] ?? "PRIVATE";
+
+    // 7. Zapisanie metadanych do bazy przez Supabase
+    const { data: newFile, error: fileError } = await supabaseAdmin
+      .from("File")
+      .insert({
+        id: randomUUID(),
+        title: title || file.name,
+        url: publicUrl,
+        format: fileExt,
+        visibility,
+        authorId: user.id,
+        subjectId: subjectIdInput ? parseInt(subjectIdInput, 10) : null,
+      })
+      .select("id, title, url, format, visibility, createdAt, pages, authorId, subjectId")
+      .single();
+
+    if (fileError || !newFile) {
+      console.error("File insert error:", fileError);
+      return NextResponse.json({ error: "Błąd podczas zapisu metadanych pliku" }, { status: 500 });
+    }
+
+    // 8. Dodanie kategorii (Tag) do bazy danych
+    if (category) {
+      const { data: tag, error: tagError } = await supabaseAdmin
+        .from("Tag")
+        .upsert({ name: category }, { onConflict: "name" })
+        .select("id, name")
+        .single();
+
+      if (tagError || !tag) {
+        console.error("Tag upsert error:", tagError);
+        return NextResponse.json({ error: "Błąd podczas zapisu tagu" }, { status: 500 });
+      }
+
+      const { error: fileTagError } = await supabaseAdmin.from("FileTag").upsert(
+        { fileId: newFile.id, tagId: tag.id },
+        { onConflict: "fileId,tagId" }
+      );
+
+      if (fileTagError) {
+        console.error("FileTag insert error:", fileTagError);
+        return NextResponse.json({ error: "Błąd podczas zapisu kategorii pliku" }, { status: 500 });
+      }
+    }
+
+    // 9. Wymuszenie odświeżenia widoku u klienta
+    revalidatePath("/dashboard");
 
     return NextResponse.json({ success: true, file: newFile });
   } catch (error) {
-    console.error("[POST /api/files]", error);
-    return NextResponse.json(
-      { error: "Internal server error during upload." },
-      { status: 500 }
-    );
+    console.error("Upload handler error:", error);
+    return NextResponse.json({ error: "Wystąpił błąd po stronie serwera" }, { status: 500 });
   }
 }
-

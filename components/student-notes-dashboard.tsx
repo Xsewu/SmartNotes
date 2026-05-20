@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { signOut } from "next-auth/react";
-import { useDeferredValue, useEffect, useMemo, useState, useRef, useTransition, useOptimistic, startTransition } from "react";
+import { logout } from "@/app/login/actions";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, useOptimistic } from "react";
+import dynamic from "next/dynamic";
+import "react-quill-new/dist/quill.snow.css";
 import {
   Search,
   Share2,
@@ -26,18 +28,25 @@ import {
   Star,
   MessageSquare,
   Send,
-  MoreVertical
+  Trash2,
+  Layers,
+  PenLine,
 } from "lucide-react";
 import { getSubjects } from "@/app/actions/subjects";
-import { getDashboardFiles, handleShareUser, toggleFavorite, rateFile, getFileComments, addComment, getUserStats } from "@/app/actions/files";
+import { getDashboardFiles, handleShareUser, toggleFavorite, rateFile, getFileComments, addComment, getUserStats, deleteFile } from "@/app/actions/files";
+import VisibilitySelectorInline from "@/components/visibility-selector-inline";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion, AnimatePresence } from "framer-motion";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { FlashcardButton } from "../FlashcardButton";
 
 type Category = "Kolokwium" | "Wykład" | "Projekt" | "Inne";
-type ViewState = "dashboard" | "my-notes" | "upload";
+type ViewState = "dashboard" | "my-notes" | "upload" | "create-note" | "flashcards";
+
+const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
 const shareSchema = z.object({
   email: z
@@ -65,6 +74,17 @@ interface Note {
   favoritesCount: number;
   commentsCount: number;
   rating: number;
+  authorId: string;
+  visibility: "PRIVATE" | "DIRECT" | "GROUP" | "YEAR";
+  format: string;
+}
+
+interface NoteDraft {
+  title: string;
+  content: string;
+  category: string;
+  subjectId: string;
+  savedAt: string;
 }
 
 const categories: Array<"Wszystkie" | Category> = ["Wszystkie", "Kolokwium", "Wykład", "Projekt", "Inne"];
@@ -83,15 +103,26 @@ const itemVariants = {
   exit: { opacity: 0, scale: 0.95, transition: { duration: 0.15 } }
 };
 
+const htmlToPlainText = (value: string) =>
+  value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 function NoteRow({
   note,
   onClick,
-  onShare,
+  onVisibilityChange,
+  currentUserId,
 }: {
   note: Note;
   onClick: () => void;
-  onShare: (e: React.MouseEvent) => void;
+  onVisibilityChange: (visibility: Note["visibility"]) => void;
+  currentUserId: string;
 }) {
+  const isAuthor = note.authorId === currentUserId;
+
   return (
     <div
       onClick={onClick}
@@ -137,21 +168,122 @@ function NoteRow({
 
       <div className="flex items-center gap-3 shrink-0">
         <div className="text-xs font-medium text-slate-600 hidden sm:block whitespace-nowrap dark:text-slate-400">{note.pages} str.</div>
-        <button
-          onClick={onShare}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-blue-600 hover:shadow-sm border border-transparent hover:border-slate-200 transition-all focus:outline-none dark:text-slate-500 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-blue-400"
-          title="Udostępnij"
-        >
-          <Share2 className="h-4 w-4" />
-        </button>
+        <VisibilitySelectorInline
+          fileId={note.id}
+          currentVisibility={note.visibility}
+          menu={isAuthor}
+          readOnly={!isAuthor}
+          onVisibilityChange={isAuthor ? onVisibilityChange : undefined}
+        />
       </div>
     </div>
   );
 }
 
-import { ThemeToggle } from "@/components/theme-toggle";
+function NoteTile({
+  note,
+  onClick,
+  onVisibilityChange,
+  currentUserId,
+}: {
+  note: Note;
+  onClick: () => void;
+  onVisibilityChange: (visibility: Note["visibility"]) => void;
+  currentUserId: string;
+}) {
+  const isAuthor = note.authorId === currentUserId;
 
-export default function StudentNotesDashboard({ user }: { user?: { email?: string | null, image?: string | null } }) {
+  return (
+    <div className="group relative flex h-full w-full flex-col overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white text-left shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800/80 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:shadow-blue-900/20">
+      <div className={`relative flex h-36 shrink-0 flex-col justify-between bg-gradient-to-br ${note.accent} p-5 text-white overflow-hidden`}>
+        <div className="absolute inset-0 bg-black/10 mix-blend-overlay opacity-0 transition-opacity group-hover:opacity-100"></div>
+        <div className="relative z-10 flex items-start justify-between">
+          <span className="inline-flex items-center rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm backdrop-blur-md">
+            {note.category}
+          </span>
+          <div className="flex gap-1.5">
+            {note.isFavorite && (
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 shadow-sm backdrop-blur-md">
+                <Bookmark className="h-3.5 w-3.5 fill-yellow-300 text-yellow-300" />
+              </span>
+            )}
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 shadow-sm backdrop-blur-md">
+              {note.format.toLowerCase() === "html" ? <FileText className="h-3.5 w-3.5 text-white/90" /> : <File className="h-3.5 w-3.5 text-white/90" />}
+            </span>
+          </div>
+        </div>
+        <div className="relative z-10 mt-auto">
+          <h4 className="mb-1.5 line-clamp-2 text-lg font-bold leading-tight drop-shadow-sm">
+            {note.title}
+          </h4>
+          <div className="flex items-center gap-3 text-xs font-medium text-white/90">
+            <span className="flex items-center gap-1"><Clock className="h-3 w-3 opacity-80" /> {note.updatedAt}</span>
+            <span className="h-1 w-1 rounded-full bg-white/50" />
+            <span>{note.pages} str.</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col p-5 text-slate-700 dark:text-slate-300">
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {note.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+
+        <div className="mb-4 grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Przedmiot</span>
+            <span className="truncate font-medium text-slate-700 dark:text-slate-200">{note.subject ? note.subject : "Brak"}</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Udostępniono</span>
+            <span className="truncate font-medium text-slate-700 dark:text-slate-200">{note.sharedWith}</span>
+          </div>
+        </div>
+
+        <div className="mt-auto mb-4 flex items-center gap-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+            <MessageSquare className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            {note.commentsCount}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+            <Star className="h-4 w-4 fill-current" />
+            {note.rating > 0 ? note.rating.toFixed(1) : "—"}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={onClick}
+            className="group/btn flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-blue-600 hover:shadow-md hover:shadow-blue-500/20 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-blue-500 dark:hover:text-white"
+          >
+            <ExternalLink className="h-4 w-4 transition-transform group-hover/btn:-translate-y-0.5 group-hover/btn:translate-x-0.5" />
+            Otwórz
+          </button>
+
+          <div className="shrink-0 rounded-xl bg-slate-50 p-1 ring-1 ring-slate-200/60 dark:bg-slate-800 dark:ring-slate-700">
+            <VisibilitySelectorInline
+              fileId={note.id}
+              currentVisibility={note.visibility}
+              menu={isAuthor}
+              readOnly={!isAuthor}
+              onVisibilityChange={isAuthor ? onVisibilityChange : undefined}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function StudentNotesDashboard({ user, flashcardsList }: { user?: { id?: string; email?: string | null, image?: string | null }, flashcardsList?: React.ReactNode }) {
   const [currentView, setCurrentView] = useState<ViewState>("dashboard");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isLoading, setIsLoading] = useState(true);
@@ -161,11 +293,17 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   const [subjects, setSubjects] = useState<{ id: number; name: string }[]>([]);
   const [activeSubject, setActiveSubject] = useState<number | "Wszystkie">("Wszystkie");
 
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+  const [noteCategory, setNoteCategory] = useState("Wykład");
+  const [noteSubjectId, setNoteSubjectId] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+
   const [uploadFile, setUploadFile] = useState<globalThis.File | null>(null);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState("Kolokwium");
   const [uploadSubjectId, setUploadSubjectId] = useState("");
-  const [uploadVisibility, setUploadVisibility] = useState("Prywatny");
+  const [uploadVisibility, setUploadVisibility] = useState<Note["visibility"]>("PRIVATE");
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -190,6 +328,24 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   
   const [userStats, setUserStats] = useState({ uploaded: 0, saved: 0, activity: "Brak", newFiles: 0 });
+  const [htmlPreviewContent, setHtmlPreviewContent] = useState<string | null>(null);
+  const [noteDraftSavedAt, setNoteDraftSavedAt] = useState<string | null>(null);
+  const noteDraftStorageKey = useMemo(
+    () => `smartnotes:note-draft:${user?.id ?? user?.email ?? "anonymous"}`,
+    [user?.email, user?.id]
+  );
+  const noteDraftLoadedRef = useRef(false);
+
+  // Zaawansowana konfiguracja paska narzędzi do edytora (uruchamiana tylko raz)
+  const quillModules = useMemo(() => ({
+    toolbar: [
+      [{ 'header': [1, 2, 3, false] }],
+      ['bold', 'italic', 'underline', 'strike'],
+      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+      ['blockquote', 'code-block'],
+      ['link', 'clean']
+    ]
+  }), []);
 
   // Funkcja ładująca komentarze gdy otwieramy plik
   useEffect(() => {
@@ -199,6 +355,18 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
         .then((data) => setComments(data))
         .catch(() => toast.error("Nie udało się załadować komentarzy."))
         .finally(() => setIsLoadingComments(false));
+    }
+
+    if (selectedNote && drawerTab === "document") {
+      const isHtml = selectedNote.format.toLowerCase() === 'html' || selectedNote.url.toLowerCase().endsWith('.html');
+      if (isHtml) {
+        fetch(selectedNote.url)
+          .then(res => res.text())
+          .then(text => setHtmlPreviewContent(text))
+          .catch(() => setHtmlPreviewContent("<html><body><h3 style='color:red;'>Błąd pobierania notatki.</h3></body></html>"));
+      } else {
+        setHtmlPreviewContent(null);
+      }
     }
   }, [selectedNote, drawerTab]);
 
@@ -278,6 +446,20 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
     }
   };
 
+  const handleDeleteFile = async () => {
+    if (!selectedNote) return;
+    if (!confirm("Czy na pewno chcesz trwale usunąć ten plik? Tej operacji nie można cofnąć.")) return;
+
+    try {
+      await deleteFile(selectedNote.id);
+      toast.success("Plik został pomyślnie usunięty.");
+      setSelectedNote(null);
+      fetchNotes(); // Odśwież widok notatek
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Błąd podczas usuwania.");
+    }
+  };
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -307,6 +489,76 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
   });
 
   const deferredQuery = useDeferredValue(query);
+  const notePlainText = useMemo(() => htmlToPlainText(noteContent), [noteContent]);
+  const noteWordCount = useMemo(() => (notePlainText ? notePlainText.split(" ").length : 0), [notePlainText]);
+  const noteCharCount = notePlainText.length;
+  const canSaveNote = noteTitle.trim().length > 0 && notePlainText.length > 0 && !isSavingNote;
+  const hasNoteDraft = noteTitle.trim().length > 0 || noteContent.trim().length > 0 || noteCategory !== "Wykład" || noteSubjectId.trim().length > 0;
+
+  const clearNoteDraft = useCallback(() => {
+    localStorage.removeItem(noteDraftStorageKey);
+    setNoteTitle("");
+    setNoteContent("");
+    setNoteCategory("Wykład");
+    setNoteSubjectId("");
+    setNoteDraftSavedAt(null);
+  }, [noteDraftStorageKey]);
+
+  useEffect(() => {
+    noteDraftLoadedRef.current = false;
+
+    try {
+      const savedDraft = localStorage.getItem(noteDraftStorageKey);
+      if (!savedDraft) {
+        noteDraftLoadedRef.current = true;
+        return;
+      }
+
+      const parsedDraft = JSON.parse(savedDraft) as Partial<NoteDraft>;
+      setNoteTitle(parsedDraft.title ?? "");
+      setNoteContent(parsedDraft.content ?? "");
+      if (parsedDraft.category) setNoteCategory(parsedDraft.category);
+      if (parsedDraft.subjectId !== undefined) setNoteSubjectId(parsedDraft.subjectId);
+      if (parsedDraft.savedAt) setNoteDraftSavedAt(parsedDraft.savedAt);
+    } catch {
+      localStorage.removeItem(noteDraftStorageKey);
+    } finally {
+      noteDraftLoadedRef.current = true;
+    }
+  }, [noteDraftStorageKey]);
+
+  useEffect(() => {
+    if (!noteDraftLoadedRef.current) return;
+
+    const draft: NoteDraft = {
+      title: noteTitle,
+      content: noteContent,
+      category: noteCategory,
+      subjectId: noteSubjectId,
+      savedAt: new Date().toISOString(),
+    };
+
+    const hasDraftContent = [draft.title, draft.content, draft.category, draft.subjectId].some(
+      (value) => value.trim().length > 0
+    );
+
+    const timeoutId = window.setTimeout(() => {
+      try {
+        if (!hasDraftContent) {
+          localStorage.removeItem(noteDraftStorageKey);
+          setNoteDraftSavedAt(null);
+          return;
+        }
+
+        localStorage.setItem(noteDraftStorageKey, JSON.stringify(draft));
+        setNoteDraftSavedAt(draft.savedAt);
+      } catch {
+        // Ignore storage failures so the editor keeps working.
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [noteCategory, noteContent, noteDraftStorageKey, noteSubjectId, noteTitle]);
 
   const fetchNotes = async () => {
     try {
@@ -322,6 +574,25 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
       toast.error("Nie udało się pobrać notatek.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleVisibilityChange = (note: Note, visibility: Note["visibility"]) => {
+    const updatedNote = { ...note, visibility };
+
+    startTransition(() => {
+      setNotes((currentNotes) =>
+        currentNotes.map((currentNote) => (currentNote.id === note.id ? updatedNote : currentNote))
+      );
+    });
+
+    if (selectedNote?.id === note.id) {
+      setSelectedNote(updatedNote);
+    }
+
+    if (visibility === "DIRECT") {
+      setSelectedNote(updatedNote);
+      setShareModalOpen(true);
     }
   };
 
@@ -355,9 +626,86 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
     });
   };
 
+  const handleSaveNote = async () => {
+    if (!noteTitle || !noteContent) {
+      toast.error("Wypełnij tytuł i treść notatki przed zapisaniem.");
+      return;
+    }
+    setIsSavingNote(true);
+
+    try {
+      // Zapisujemy notatkę ze wsparciem dla Dark Mode (kolory dostosują się same)
+      const htmlContent = `<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${noteTitle}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { 
+    font-family: system-ui, -apple-system, sans-serif; 
+    line-height: 1.6; 
+    max-width: 800px; 
+    margin: 0 auto; 
+    padding: 2rem; 
+    background-color: #ffffff;
+    color: #0f172a;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background-color: #0f172a; color: #f8fafc; }
+  }
+  h1 { border-bottom: 1px solid #cbd5e1; padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
+  @media (prefers-color-scheme: dark) { h1 { border-bottom-color: #334155; } }
+  blockquote { border-left: 4px solid #3b82f6; margin: 1.5em 0; padding-left: 1rem; color: #475569; font-style: italic; }
+  @media (prefers-color-scheme: dark) { blockquote { color: #94a3b8; border-left-color: #3b82f6; } }
+  pre.ql-syntax { background: #f1f5f9; padding: 1rem; overflow-x: auto; border-radius: 8px; font-family: ui-monospace, monospace; font-size: 0.9em; border: 1px solid #e2e8f0; }
+  @media (prefers-color-scheme: dark) { pre.ql-syntax { background: #1e293b; border-color: #334155; } }
+  img { max-width: 100%; height: auto; border-radius: 8px; margin: 1rem 0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+</style>
+</head>
+<body>
+  <h1>${noteTitle}</h1>
+  ${noteContent}
+</body>
+</html>`;
+
+      const blob = new Blob([htmlContent], { type: "text/html" });
+      const file = new globalThis.File([blob], `${noteTitle}.html`, { type: "text/html" });
+
+      // Pakujemy go do paczki i wysyłamy do istniejącego API tak jak zwykły upload!
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("title", noteTitle);
+      formData.append("category", noteCategory);
+      formData.append("visibility", "PRIVATE"); // Domyślnie notatka jest prywatna
+      if (noteSubjectId) formData.append("subjectId", noteSubjectId);
+
+      const res = await fetch("/api/files", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Błąd podczas zapisywania notatki.");
+      
+      clearNoteDraft();
+      toast.success("Notatka została pomyślnie zapisana!");
+      setNoteTitle("");
+      setNoteContent("");
+      setNoteSubjectId("");
+      fetchNotes(); // Odśwież listę w tle
+      setCurrentView("my-notes"); // Przenieś do widoku notatek
+    } catch (error) {
+      toast.error("Wystąpił problem z zapisem notatki.");
+      console.error(error);
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
   useEffect(() => {
     fetchNotes();
-  }, [currentView]);
+  }, []);
 
   const filteredNotes = useMemo(() => {
     return optimisticNotes.filter((note) => {
@@ -420,6 +768,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
     { id: "dashboard", label: "Panel główny", icon: LayoutDashboard },
     { id: "my-notes", label: "Przeglądaj notatki", icon: FolderOpen },
     { id: "upload", label: "Dodaj pliki", icon: UploadCloud },
+    { id: "create-note", label: "Utwórz notatkę", icon: PenLine },
+    { id: "flashcards", label: "Moje fiszki", icon: Layers },
   ] as const;
 
   return (
@@ -463,7 +813,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             className="w-full text-left flex items-center gap-3 rounded-xl hover:bg-slate-50 p-2 transition-colors dark:hover:bg-slate-800"
           >
             {user?.image ? (
-              <img src={user.image} alt="Avatar" className="h-10 w-10 rounded-full object-cover shadow-sm border border-slate-200 dark:border-slate-700" />
+              <Image src={user.image} alt="Avatar" width={40} height={40} className="h-10 w-10 rounded-full object-cover shadow-sm border border-slate-200 dark:border-slate-700" />
             ) : (
               <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm dark:bg-blue-900/50 dark:border-blue-800 dark:text-blue-400">
                 {user?.email?.[0]?.toUpperCase() || "U"}
@@ -490,7 +840,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 Ustawienia
               </Link>
               <button
-                onClick={() => signOut({ callbackUrl: '/' })}
+                onClick={() => logout()}
                 className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors dark:text-rose-400 dark:hover:bg-rose-950/20"
               >
                 <LogOut className="h-4 w-4" />
@@ -533,7 +883,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 border border-blue-200 text-blue-700 font-bold shadow-sm overflow-hidden"
               >
                 {user?.image ? (
-                  <img src={user.image} alt="Avatar" className="h-full w-full object-cover" />
+                  <Image src={user.image} alt="Avatar" width={40} height={40} className="h-full w-full object-cover" />
                 ) : (
                   user?.email?.[0]?.toUpperCase() || "U"
                 )}
@@ -552,7 +902,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     Ustawienia
                   </Link>
                   <button
-                    onClick={() => signOut({ callbackUrl: '/' })}
+                    onClick={() => logout()}
                     className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
                   >
                     <LogOut className="h-4 w-4" />
@@ -592,7 +942,6 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
               {/* Stats Section */}
               <div>
-                <h3 className="mb-4 hidden text-lg font-semibold text-slate-900 dark:text-slate-100 sm:block">Podsumowanie Twojego konta</h3>
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
@@ -627,48 +976,13 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                 
                 <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {optimisticNotes.slice(0, 4).map(note => (
-                    <div 
-                      key={note.id} 
+                    <NoteTile
+                      key={note.id}
+                      note={note}
                       onClick={() => setSelectedNote(note)}
-                      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
-                    >
-                      {/* Generowany miniaturowy podgląd - Grid z obrazkiem */}
-                      <div className={`h-36 w-full bg-gradient-to-br ${note.accent} p-4 flex flex-col justify-between opacity-90 transition-opacity group-hover:opacity-100`}>
-                        <div className="flex justify-end">
-                           <span className="inline-flex rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-sm backdrop-blur-md">
-                             {note.category}
-                           </span>
-                        </div>
-                        <ImageIcon className="h-8 w-8 text-white/50" />
-                      </div>
-                      
-                      <div className="flex flex-1 flex-col p-4 dark:border-t-slate-800">
-                        <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">{note.title}</h4>
-                        <div className="mt-auto pt-4 flex items-center justify-between">
-                           <div className="flex flex-wrap gap-1">
-                             {note.tags.slice(0, 2).map((tag) => (
-                               <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                                 {tag}
-                               </span>
-                             ))}
-                           </div>
-                           <div className="flex items-center gap-2 text-xs font-semibold">
-                             <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-500">
-                               <Star className="h-3 w-3 fill-current" />
-                               {note.rating > 0 ? note.rating : "—"}
-                             </div>
-                             <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                               <MessageSquare className="h-3 w-3" />
-                               {note.commentsCount}
-                             </div>
-                           </div>
-                        </div>
-                        <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">{note.pages} str.</span>
-                        </div>
-                      </div>
-                    </div>
+                      onVisibilityChange={(visibility) => handleVisibilityChange(note, visibility)}
+                      currentUserId={user?.id || ""}
+                    />
                   ))}
                 </div>
               </div>
@@ -737,7 +1051,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     viewMode === 'grid' ? (
                     Array.from({ length: 8 }).map((_, i) => (
                       <div key={i} className="h-[280px] w-full animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                        <div className="h-36 rounded-t-2xl bg-slate-100 dark:bg-slate-800"></div>
+                        <div className="h-44 rounded-t-2xl bg-slate-100 dark:bg-slate-800"></div>
                         <div className="p-4 space-y-3">
                           <div className="h-4 w-3/4 rounded bg-slate-100 dark:bg-slate-800"></div>
                           <div className="h-4 w-1/2 rounded bg-slate-100 dark:bg-slate-800"></div>
@@ -774,68 +1088,23 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                         {filteredNotes.map(note => (
                           <motion.div
                             key={note.id}
-                            // @ts-ignore
+                            // @ts-expect-error framer-motion variants typing is narrower here
                             variants={itemVariants}
                             className="w-full"
                           >
                             {viewMode === 'grid' ? (
-                              <div 
+                              <NoteTile
+                                note={note}
                                 onClick={() => setSelectedNote(note)}
-                                className="group h-full relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
-                              >
-                                {/* Podgląd / Zdjęcie */}
-                                <div className={`h-36 w-full bg-gradient-to-br ${note.accent} p-4 flex flex-col justify-between opacity-90 transition-opacity group-hover:opacity-100`}>
-                                  <div className="flex justify-between">
-                                     <span className="inline-flex rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-sm backdrop-blur-md">
-                                       {note.category}
-                                     </span>
-                                     <button className="rounded-full bg-white/20 p-1.5 text-white opacity-0 backdrop-blur-md transition-opacity group-hover:opacity-100 hover:bg-white/40 shadow-sm">
-                                       <Share2 className="h-3 w-3" />
-                                     </button>
-                                  </div>
-                                  <ImageIcon className="h-8 w-8 text-white/50" />
-                                </div>
-                                
-                                <div className="flex flex-1 flex-col p-4 dark:border-t-slate-800">
-                                  <h4 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">{note.title}</h4>
-                                  
-                                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Udostępniono dla: <span className="font-semibold text-slate-700 dark:text-slate-300">{note.sharedWith}</span></div>
-
-                                  <div className="mt-auto pt-4 flex items-center justify-between">
-                                     <div className="flex flex-wrap gap-1">
-                                       {note.tags.slice(0, 2).map((tag) => (
-                                         <span key={tag} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                                           {tag}
-                                         </span>
-                                       ))}
-                                     </div>
-                                     <div className="flex items-center gap-2 text-xs font-semibold">
-                                       {note.isFavorite && <Bookmark className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />}
-                                       <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-500">
-                                         <Star className="h-3 w-3 fill-current" />
-                                         {note.rating > 0 ? note.rating : "—"}
-                                       </div>
-                                       <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                                         <MessageSquare className="h-3 w-3" />
-                                         {note.commentsCount}
-                                       </div>
-                                     </div>
-                                  </div>
-                                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {note.updatedAt}</span>
-                                    <span className="font-semibold text-slate-700 dark:text-slate-300">{note.pages} str.</span>
-                                  </div>
-                                </div>
-                              </div>
+                                onVisibilityChange={(visibility) => handleVisibilityChange(note, visibility)}
+                                currentUserId={user?.id || ""}
+                              />
                             ) : (
                               <NoteRow 
                                 note={note}
                                 onClick={() => setSelectedNote(note)}
-                                onShare={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedNote(note);
-                                  setShareModalOpen(true);
-                                }}
+                                onVisibilityChange={(visibility) => handleVisibilityChange(note, visibility)}
+                                currentUserId={user?.id || ""}
                               />
                             )}
                           </motion.div>
@@ -927,12 +1196,13 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Udostępnij dla</label>
                            <select 
                              value={uploadVisibility}
-                             onChange={(e) => setUploadVisibility(e.target.value)}
+                             onChange={(e) => setUploadVisibility(e.target.value as Note["visibility"])}
                              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
                            >
-                             <option value="Prywatny">Prywatny</option>
-                             <option value="Moja Grupa">Moja Grupa</option>
-                             <option value="Cały Rocznik">Cały Rocznik</option>
+                             <option value="PRIVATE">Prywatny</option>
+                             <option value="DIRECT">Wybrani użytkownicy</option>
+                             <option value="GROUP">Moja Grupa</option>
+                             <option value="YEAR">Cały Rocznik</option>
                            </select>
                          </div>
                        </div>
@@ -954,6 +1224,119 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
              </div>
           )}
 
+          {/* VIEW: CREATE NOTE */}
+          {currentView === "create-note" && (
+            <div className="mx-auto max-w-5xl animate-in fade-in slide-in-from-bottom-4 duration-500 h-full pb-10 flex flex-col">
+              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10 dark:border-slate-800 dark:bg-slate-900 flex-1 flex flex-col min-h-[700px]">
+                <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Nowa notatka</h2>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Napisz tytuł, dobierz kontekst i formatuj treść bez wychodzenia z jednego ekranu.</p>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 sm:max-w-full">
+                      <span className={`h-2.5 w-2.5 rounded-full ${hasNoteDraft ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`} />
+                      <span className="truncate">{hasNoteDraft ? `Szkic zapisany${noteDraftSavedAt ? ` · ${new Date(noteDraftSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Brak szkicu"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearNoteDraft}
+                      disabled={!hasNoteDraft}
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 sm:self-end"
+                    >
+                      Usuń szkic
+                    </button>
+                    <button 
+                      onClick={() => {
+                        clearNoteDraft();
+                        setCurrentView("my-notes");
+                      }}
+                      className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 sm:self-end"
+                    >
+                      Anuluj
+                    </button>
+                    <button 
+                      onClick={handleSaveNote}
+                      disabled={!canSaveNote}
+                      className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed dark:shadow-blue-900/20 sm:self-end"
+                    >
+                      {isSavingNote ? <Clock className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
+                      {isSavingNote ? "Zapisywanie..." : "Zapisz do bazy"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-5 flex flex-col">
+                  <div className="space-y-2">
+                    <label className="sr-only" htmlFor="note-title">Tytuł notatki</label>
+                    <input 
+                      id="note-title"
+                      type="text" 
+                      value={noteTitle}
+                      onChange={(e) => setNoteTitle(e.target.value)}
+                      placeholder="Nadaj notatce konkretny tytuł..."
+                      className="w-full bg-transparent px-2 text-3xl font-bold text-slate-900 placeholder-slate-300 outline-none transition-all dark:text-slate-100 dark:placeholder-slate-700" 
+                    />
+                    <p className="px-2 text-sm text-slate-500 dark:text-slate-400">Dobry tytuł pozwala szybciej wrócić do notatki po czasie.</p>
+                  </div>
+
+                  <div className="grid gap-4 px-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                    <label className="space-y-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Kategoria</span>
+                      <select value={noteCategory} onChange={(e) => setNoteCategory(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <option value="Kolokwium">Kolokwium</option><option value="Wykład">Wykład</option><option value="Projekt">Projekt</option><option value="Inne">Inne</option>
+                      </select>
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Przedmiot</span>
+                      <select value={noteSubjectId} onChange={(e) => setNoteSubjectId(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <option value="">Brak przedmiotu</option>
+                        {subjects.map((subj) => (<option key={subj.id} value={subj.id}>{subj.name}</option>))}
+                      </select>
+                    </label>
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400">
+                      <div className="font-medium text-slate-700 dark:text-slate-200">{noteWordCount} słów</div>
+                      <div>{noteCharCount} znaków bez znaczników</div>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 mt-2 rounded-2xl border border-slate-200 bg-white overflow-hidden dark:border-slate-800 dark:bg-slate-900/50 flex flex-col [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 dark:[&_.ql-toolbar]:border-slate-800 [&_.ql-toolbar]:bg-slate-50/50 dark:[&_.ql-toolbar]:bg-slate-900/80 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[400px] [&_.ql-editor]:text-base [&_.ql-editor]:text-slate-800 dark:[&_.ql-editor]:text-slate-200 [&_.ql-stroke]:dark:stroke-slate-400 [&_.ql-fill]:dark:fill-slate-400 [&_.ql-picker]:dark:text-slate-400">
+                    <ReactQuill 
+                      theme="snow"
+                      value={noteContent}
+                      onChange={setNoteContent}
+                      modules={quillModules}
+                      placeholder="Zacznij pisać swoją notatkę tutaj... Możesz wklejać obrazki, linki i zaznaczać kod."
+                      className="flex-1 flex flex-col"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-2 pb-1 text-sm text-slate-500 dark:text-slate-400">
+                    <p>{notePlainText ? "Treść jest gotowa do zapisania." : "Dodaj treść notatki, aby odblokować zapis."}</p>
+                    <button
+                      type="button"
+                      onClick={() => setNoteContent("")}
+                      className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Wyczyść treść
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: FLASHCARDS */}
+          {currentView === "flashcards" && (
+             <div className="mx-auto max-w-6xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <div className="mb-6">
+                 <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Moje talie fiszek</h2>
+                 <p className="mt-2 text-slate-500 dark:text-slate-400">Przeglądaj i ucz się ze swoich materiałów wygenerowanych przez AI.</p>
+               </div>
+               {flashcardsList}
+             </div>
+          )}
+
         </div>
       </main>
 
@@ -966,19 +1349,19 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             onClick={() => setSelectedNote(null)} 
           />
           {/* Drawer */}
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl transform border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-[500px] md:w-[700px] flex flex-col dark:border-slate-800 dark:bg-slate-900">
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-3xl transform flex-col border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-[500px] md:w-[700px] dark:border-slate-800 dark:bg-slate-900">
             
             {/* Drawer Header */}
-            <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-6 dark:border-slate-800">
-              <div className="flex flex-col overflow-hidden w-full max-w-sm">
+            <div className="flex shrink-0 flex-col gap-3 border-b border-slate-100 px-6 py-4 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
                 <h2 className="truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{selectedNote.title}</h2>
-                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span>Dodano: {selectedNote.updatedAt}</span>
                   <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
                   <span className="font-medium text-blue-600 dark:text-blue-400">{selectedNote.category}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 ml-4 shrink-0">
+              <div className="flex shrink-0 items-center gap-2 self-start sm:ml-4">
                 <button
                   onClick={handleToggleFavorite}
                   className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
@@ -1033,17 +1416,25 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
             </div>
 
             {/* Drawer Content */}
-            <div className="flex-1 overflow-hidden bg-slate-100/50 flex flex-col p-0 sm:p-4 dark:bg-slate-900/50">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100/50 p-0 sm:p-4 dark:bg-slate-900/50">
               {drawerTab === "document" ? (
-                <div className="h-full w-full sm:rounded-xl overflow-hidden border-0 sm:border border-slate-200 shadow-sm bg-white dark:border-slate-700 dark:bg-slate-900">
-                  <iframe 
-                    src={`${selectedNote.url}#toolbar=0`} 
-                    className="w-full h-full border-none bg-white dark:bg-slate-900"
-                    title={selectedNote.title}
-                  />
+                <div className="h-full min-h-0 w-full overflow-hidden border-0 bg-white shadow-sm sm:rounded-xl sm:border sm:border-slate-200 dark:border-slate-700 dark:bg-slate-900">
+                  {selectedNote.format.toLowerCase() === 'html' || selectedNote.url.toLowerCase().endsWith('.html') ? (
+                    <iframe 
+                      srcDoc={htmlPreviewContent || "<html><body style='font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; color: #64748b;'>Ładowanie notatki...</body></html>"} 
+                      className="h-full w-full border-none bg-white dark:bg-slate-900"
+                      title={selectedNote.title}
+                    />
+                  ) : (
+                    <iframe 
+                      src={`${selectedNote.url}#toolbar=0`} 
+                      className="h-full w-full border-none bg-white dark:bg-slate-900"
+                      title={selectedNote.title}
+                    />
+                  )}
                 </div>
               ) : (
-                <div className="flex flex-col h-full bg-white sm:rounded-xl border-y sm:border-x border-slate-200 shadow-sm overflow-hidden dark:border-slate-700 dark:bg-slate-900">
+                <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white shadow-sm sm:rounded-xl sm:border sm:border-slate-200 dark:border-slate-700 dark:bg-slate-900">
                   <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex flex-col gap-3">
                     <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-widest">Oceń materiał</h3>
                     <div className="flex items-center gap-2">
@@ -1060,7 +1451,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     </div>
                   </div>
                   
-                  <div className="flex-1 overflow-y-auto p-5 pb-20 scroll-smooth space-y-5">
+                  <div className="flex-1 min-h-0 overflow-y-auto p-5 pb-20 scroll-smooth space-y-5">
                     {isLoadingComments ? (
                        <div className="flex justify-center py-10 opacity-50"><Clock className="h-6 w-6 animate-spin text-slate-400" /></div>
                     ) : comments.length === 0 ? (
@@ -1072,8 +1463,8 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     ) : (
                        comments.map((comment) => (
                           <div key={comment.id} className={`flex gap-3 ${comment.isAuthor ? "flex-row-reverse" : "flex-row"}`}>
-                            {comment.authorImage ? (
-                               <img src={comment.authorImage} alt="" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full object-cover border border-slate-200 shadow-sm dark:border-slate-800" />
+                             {comment.authorImage ? (
+                               <Image src={comment.authorImage} alt="" width={32} height={32} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full object-cover border border-slate-200 shadow-sm dark:border-slate-800" />
                             ) : (
                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-900/50 dark:text-blue-400">
                                   {comment.authorEmail[0].toUpperCase()}
@@ -1098,7 +1489,7 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                     )}
                   </div>
                   
-                  <div className="p-4 border-t border-slate-100 bg-slate-50/50 mt-auto flex gap-2 items-end dark:border-slate-800 dark:bg-slate-900/50 relative">
+                  <div className="relative mt-auto flex flex-col gap-3 border-t border-slate-100 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-900/50 sm:flex-row sm:items-end">
                      <textarea
                        placeholder="Napisz komentarz..."
                        value={newComment}
@@ -1110,12 +1501,12 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
                          }
                        }}
                        rows={2}
-                       className="flex-1 resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-600"
+                       className="min-h-[92px] flex-1 resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-600 sm:min-h-0"
                      />
                      <button
                        onClick={handlePostComment}
                        disabled={isSubmittingComment || !newComment.trim()}
-                       className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
+                       className="flex h-12 w-full shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-blue-700 sm:w-12 sm:px-0"
                      >
                        {isSubmittingComment ? <Clock className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 ml-0.5" />}
                      </button>
@@ -1126,29 +1517,28 @@ export default function StudentNotesDashboard({ user }: { user?: { email?: strin
 
               {/* Drawer Footer Details */}
             <div className="shrink-0 border-t border-slate-100 bg-white p-5 lg:p-6 dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <div className="flex -space-x-2">
-                    <div className="h-8 w-8 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-xs font-bold text-blue-700 dark:border-slate-900 dark:bg-blue-900/40 dark:text-blue-300">SR</div>
-                  </div>
-                  <div className="text-sm">
-                    <p className="font-medium text-slate-900 dark:text-slate-100">Udostępnione dla:</p>
-                    <p className="text-slate-500 max-w-xs truncate dark:text-slate-400" title={selectedNote.sharedWith}>{selectedNote.sharedWith}</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => setShareModalOpen(true)}
-                    className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-md shadow-slate-900/10 hover:bg-slate-800 transition dark:bg-blue-600 dark:shadow-blue-900/20 dark:hover:bg-blue-700"
-                  >
-                    <Users className="h-4 w-4" />
-                    Zaproś email
-                  </button>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="grid w-full gap-2 sm:w-auto sm:flex sm:flex-wrap sm:items-center">
+                  <FlashcardButton fileId={selectedNote.id} format={selectedNote.format} />
+                  {selectedNote.authorId === user?.id && (
+                    <button
+                      onClick={() => setShareModalOpen(true)}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:w-auto sm:py-1.5"
+                    >
+                      <Share2 className="w-4 h-4" /> Udostępnij
+                    </button>
+                  )}
+                  {selectedNote.authorId === user?.id && (
+                    <button
+                      onClick={handleDeleteFile}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-transparent bg-rose-50 px-3 py-2 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 disabled:cursor-not-allowed dark:bg-rose-500/10 dark:text-rose-400 dark:hover:bg-rose-500/20 sm:w-auto sm:py-1.5"
+                    >
+                      <Trash2 className="w-4 h-4" /> Usuń
+                    </button>
+                  )}
                 </div>
               </div>
-              
-              <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
                 {selectedNote.tags.map((tag) => (
                   <span key={tag} className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     {tag}

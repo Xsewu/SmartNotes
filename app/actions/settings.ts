@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db/prisma";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import bcrypt from "bcryptjs";
 
 export async function changePassword(formData: FormData) {
@@ -26,15 +26,14 @@ export async function changePassword(formData: FormData) {
     return { error: "Nowe hasło musi mieć co najmniej 6 znaków." };
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const supabase = getSupabaseAdminClient();
+  const userResult = await supabase.from("User").select("id, passwordHash").eq("email", session.user.email).single();
 
-  if (!user || !user.passwordHash) {
+  if (userResult.error || !userResult.data?.passwordHash) {
     return { error: "Nie znaleziono użytkownika lub hasła." };
   }
 
-  const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
+  const isValidPassword = await bcrypt.compare(currentPassword, userResult.data.passwordHash);
 
   if (!isValidPassword) {
     return { error: "Obecne hasło jest nieprawidłowe." };
@@ -42,10 +41,11 @@ export async function changePassword(formData: FormData) {
 
   const newPasswordHash = await bcrypt.hash(newPassword, 10);
 
-  await prisma.user.update({
-    where: { email: session.user.email },
-    data: { passwordHash: newPasswordHash },
-  });
+  const updateResult = await supabase.from("User").update({ passwordHash: newPasswordHash }).eq("email", session.user.email);
+
+  if (updateResult.error) {
+    return { error: "Błąd aktualizacji hasła." };
+  }
 
   return { success: true };
 }

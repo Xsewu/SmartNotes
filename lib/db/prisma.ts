@@ -1,6 +1,6 @@
+import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../../app/generated/prisma/client";
 
 declare global {
   // Prevent multiple instances of PrismaClient in development (HMR).
@@ -8,12 +8,24 @@ declare global {
 }
 
 function createPrismaClient(): PrismaClient {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
+  let connectionString = process.env.DATABASE_URL;
+  
+  if (!connectionString) {
+    throw new Error("❌ BŁĄD: Brak zmiennej DATABASE_URL!");
+  }
+
+  // Remove sslmode=require from the connection string so it doesn't override our custom ssl config
+  connectionString = connectionString.replace('?sslmode=require', '').replace('&sslmode=require', '');
+
+  const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
   const adapter = new PrismaPg(pool);
-  return new PrismaClient({ adapter });
+  return new PrismaClient({
+    adapter
+  });
 }
+
+// Usuwamy starą instancję z pamięci podręcznej (HMR), aby wymusić nowe połączenie
+if (process.env.NODE_ENV !== "production") global.__prisma = undefined;
 
 export const prisma: PrismaClient =
   global.__prisma ?? createPrismaClient();
@@ -21,5 +33,3 @@ export const prisma: PrismaClient =
 if (process.env.NODE_ENV !== "production") {
   global.__prisma = prisma;
 }
-
-

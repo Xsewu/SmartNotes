@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/db/prisma";
 import { auth } from "@/auth";
-import { readFile } from "fs/promises";
-import { join } from "path";
-import { Visibility } from "../../../../app/generated/prisma/client";
+import { Visibility } from "@prisma/client";
 
 export async function GET(
   request: NextRequest,
@@ -23,7 +21,7 @@ export async function GET(
       include: { sharePermissions: true },
     });
 
-    if (!file) {
+    if (!file || !file.url) {
       return new NextResponse("File not found.", { status: 404 });
     }
 
@@ -40,9 +38,14 @@ export async function GET(
       return new NextResponse("Forbidden. You don't have access to this file.", { status: 403 });
     }
 
-    // Read file from the server's private 'uploads' folder
-    const filePath = join(process.cwd(), "uploads", id);
-    const fileBuffer = await readFile(filePath);
+    // Pobierz plik ze zdalnego adresu (Supabase Storage)
+    const remoteResponse = await fetch(file.url);
+    if (!remoteResponse.ok) {
+       console.error("Failed to fetch from remote URL", remoteResponse.statusText);
+       return new NextResponse("File not available remotely.", { status: 502 });
+    }
+
+    const fileBuffer = await remoteResponse.arrayBuffer();
 
     // Serve the file to the browser
     return new NextResponse(fileBuffer, {

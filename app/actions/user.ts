@@ -1,10 +1,8 @@
 "use server";
 
-import { prisma } from "@/lib/db/prisma";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
 
 export async function uploadAvatar(formData: FormData) {
@@ -21,21 +19,43 @@ export async function uploadAvatar(formData: FormData) {
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
-  // Zapis do folderu publicznego umozliwi bezpośredni dostęp przez przeglądarkę
-  const fileName = `${uuidv4()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "")}`;
-  const uploadDir = join(process.cwd(), "public", "avatars");
-  
-  await mkdir(uploadDir, { recursive: true });
-  
-  const filePath = join(uploadDir, fileName);
-  await writeFile(filePath, buffer);
+  // Upload avatar to Supabase Storage (public) and update user.image to public URL
+  const fileName = `avatars/${uuidv4()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "")}`;
+  const supabase = getSupabaseAdminClient();
 
-  const avatarUrl = `/avatars/${fileName}`;
-
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { image: avatarUrl },
+  const { error: storageError } = await supabase.storage.from("uploads").upload(fileName, buffer, {
+    contentType: file.type,
+    upsert: false,
   });
+
+  if (storageError) {
+    console.error("Avatar storage error:", storageError);
+    throw new Error("Błąd podczas wgrywania avatara do Storage.");
+  }
+
+  const { data: publicData } = supabase.storage.from("uploads").getPublicUrl(fileName);
+  const avatarUrl = publicData?.publicUrl || `/avatars/${fileName}`;
+  console.log("uploadAvatar -> user:", session.user.id, "avatarUrl:", avatarUrl);
+
+  // Ensure user exists and then update image
+  const { data: upsertUser, error: upsertErr } = await supabase
+    .from("User")
+    .upsert({ id: session.user.id, email: session.user.email?.toLowerCase() ?? session.user.id, updatedAt: new Date().toISOString() }, { onConflict: "id" })
+    .select("id")
+    .single();
+
+  if (upsertErr || !upsertUser) {
+    console.error("User upsert error:", upsertErr);
+    throw new Error("Błąd synchronizacji użytkownika przed aktualizacją avatara.");
+  }
+
+  const updateResult = await supabase.from("User").update({ image: avatarUrl }).eq("id", session.user.id);
+  if (updateResult.error) {
+    console.error("User update error:", updateResult.error);
+    throw new Error("Błąd aktualizacji profilu.");
+  }
+
+  console.log("uploadAvatar -> updated user:", session.user.id);
 
   revalidatePath("/dashboard");
   revalidatePath("/settings");

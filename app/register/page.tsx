@@ -1,55 +1,22 @@
 "use client";
 
-import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { signup } from "../login/actions";
 import { GraduationCap, Mail, Users, User, ArrowRight, AlertCircle, Lock } from "lucide-react";
 
-export default function RegisterPage() {
-  const router = useRouter();
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [yearOfStudy, setYearOfStudy] = useState("1");
-  const [studyGroup, setStudyGroup] = useState("");
-  
-  const [error, setError] = useState<string | null>(null);
+function RegisterForm() {
   const [loading, setLoading] = useState(false);
+  const searchParams = useSearchParams();
+  const errorParam = searchParams.get("error");
+  const codeParam = searchParams.get("code");
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const error = errorParam === "true" && codeParam ? codeParam : null;
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (loading) e.preventDefault();
     setLoading(true);
-
-    try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          yearOfStudy: parseInt(yearOfStudy, 10),
-          studyGroup,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Wystąpił nieznany błąd podczas rejestracji.");
-      }
-
-      // Successful registration
-      router.push("/login?success=registered");
-    } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message || "Błąd komunikacji z serwerem.");
-      } else {
-        setError("Błąd komunikacji z serwerem.");
-      }
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (
@@ -77,7 +44,7 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form action={signup} onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2 ml-1">
               Adres e-mail <span className="text-slate-400 font-normal">(w domenie stud.prz.edu.pl)</span>
@@ -86,10 +53,9 @@ export default function RegisterPage() {
               <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 id="email"
+                name="email"
                 type="email"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
                 placeholder="np. 123456@stud.prz.edu.pl"
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-12 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                 disabled={loading}
@@ -105,11 +71,10 @@ export default function RegisterPage() {
               <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 id="password"
+                name="password"
                 type="password"
                 required
                 minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 placeholder="Minimum 6 znaków"
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-12 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                 disabled={loading}
@@ -126,12 +91,12 @@ export default function RegisterPage() {
                 <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
                   id="yearOfStudy"
+                  name="yearOfStudy"
                   type="number"
                   min="1"
                   max="6"
                   required
-                  value={yearOfStudy}
-                  onChange={(e) => setYearOfStudy(e.target.value)}
+                  defaultValue="1"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-12 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                   disabled={loading}
                 />
@@ -146,10 +111,9 @@ export default function RegisterPage() {
                 <Users className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
                   id="studyGroup"
+                  name="studyGroup"
                   type="text"
                   required
-                  value={studyGroup}
-                  onChange={(e) => setStudyGroup(e.target.value)}
                   placeholder="np. IN21 lub D4"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-12 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                   disabled={loading}
@@ -178,5 +142,13 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Ładowanie...</div>}>
+      <RegisterForm />
+    </Suspense>
   );
 }

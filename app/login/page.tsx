@@ -1,15 +1,13 @@
 "use client";
 
-import { signIn } from "next-auth/react";
-import { useState, FormEvent, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { login } from "./actions";
 
 import { FileText, Mail, ArrowRight } from "lucide-react";
 
 function LoginForm() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
@@ -17,11 +15,10 @@ function LoginForm() {
   const success = searchParams.get("success");
   const verified = searchParams.get("verified");
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    // Prevent double submissions
+    if (loading) e.preventDefault();
     setLoading(true);
-    await signIn("credentials", { email, password, callbackUrl: "/dashboard" });
-    setLoading(false);
   };
 
   return (
@@ -76,7 +73,7 @@ function LoginForm() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form action={login} onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2 ml-1">
               Adres e-mail <span className="text-slate-400 font-normal">(w domenie stud.prz.edu.pl)</span>
@@ -85,10 +82,9 @@ function LoginForm() {
               <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 id="email"
+                name="email"
                 type="email"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
                 placeholder="np. 123456@stud.prz.edu.pl"
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-12 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                 disabled={loading}
@@ -103,10 +99,9 @@ function LoginForm() {
             <div className="relative">
               <input
                 id="password"
+                name="password"
                 type="password"
                 required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 placeholder="Hasło"
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white disabled:opacity-60"
                 disabled={loading}

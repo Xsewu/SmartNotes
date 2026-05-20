@@ -1,71 +1,54 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-enum UserRole {
-  STUDENT
-  ADMIN
-}
-
-enum Visibility {
-  PRIVATE
-  DIRECT
-  GROUP
-  YEAR
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id            String    @id @default(uuid())
+  id                  String            @id @default(uuid())
   /// Email domain should be validated at the application layer:
   /// @stud.prz.edu.pl
-  email         String    @unique
-  passwordHash  String?
-  emailVerified DateTime?
-  studentIndex  String?   @unique
-  image         String?
-  yearOfStudy   Int?
-  studyGroup    String?
-  isVerified    Boolean   @default(false)
-  role          UserRole  @default(STUDENT)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
+  email               String            @unique
+  passwordHash        String?
+  emailVerified       DateTime?
+  studentIndex        String?           @unique
+  image               String?
+  yearOfStudy         Int?
+  studyGroup          String?
+  isVerified          Boolean           @default(false)
+  role                UserRole          @default(STUDENT)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  accounts            Account[]
+  comments            Comment[]
+  favorites           Favorite[]
   files               File[]
+  flashcardDecks      FlashcardDeck[]
+  ratings             Rating[]
+  sessions            Session[]
   receivedPermissions SharePermission[] @relation("UserSharePermissions")
-
-  accounts Account[]
-  sessions Session[]
-  favorites Favorite[]
-  ratings   Rating[]
-  comments  Comment[]
 
   @@map("User")
 }
 
 model Account {
-  id                 String  @id @default(uuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String? @db.Text
-  access_token       String? @db.Text
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String? @db.Text
-  session_state      String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@map("Account")
@@ -94,7 +77,6 @@ model Subject {
   id          Int    @id @default(autoincrement())
   name        String
   yearOfStudy Int
-
   files       File[]
 
   @@unique([name, yearOfStudy])
@@ -102,25 +84,23 @@ model Subject {
 }
 
 model File {
-  id         String     @id @default(uuid())
-  title      String
-  url        String
-  format     String
-  visibility Visibility @default(PRIVATE)
-  createdAt  DateTime   @default(now())
-  pages      Int        @default(1)
-
-  authorId String
-  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  subjectId Int?
-  subject   Subject? @relation(fields: [subjectId], references: [id])
-
-  tags             FileTag[]
-  sharePermissions SharePermission[]
-  favorites        Favorite[]
-  ratings          Rating[]
+  id               String            @id @default(uuid())
+  title            String
+  url              String
+  format           String
+  visibility       Visibility        @default(PRIVATE)
+  createdAt        DateTime          @default(now())
+  pages            Int               @default(1)
+  authorId         String
+  subjectId        Int?
   comments         Comment[]
+  favorites        Favorite[]
+  author           User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  subject          Subject?          @relation(fields: [subjectId], references: [id])
+  tags             FileTag[]
+  flashcardDecks   FlashcardDeck[]
+  ratings          Rating[]
+  sharePermissions SharePermission[]
 
   @@index([authorId])
   @@index([visibility])
@@ -128,9 +108,8 @@ model File {
 }
 
 model Tag {
-  id   Int    @id @default(autoincrement())
-  name String @unique
-
+  id    Int       @id @default(autoincrement())
+  name  String    @unique
   files FileTag[]
 
   @@map("Tag")
@@ -139,9 +118,8 @@ model Tag {
 model FileTag {
   fileId String
   tagId  Int
-
-  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([fileId, tagId])
   @@map("FileTag")
@@ -149,14 +127,12 @@ model FileTag {
 
 /// Direct sharing: links a file with one specific recipient user.
 model SharePermission {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-
-  fileId String
-  file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
-
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  fileId      String
   recipientId String
-  recipient   User   @relation("UserSharePermissions", fields: [recipientId], references: [id], onDelete: Cascade)
+  file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  recipient   User     @relation("UserSharePermissions", fields: [recipientId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, recipientId])
   @@index([recipientId])
@@ -166,12 +142,10 @@ model SharePermission {
 model Favorite {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
-
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   fileId    String
   file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, fileId])
 }
@@ -179,26 +153,57 @@ model Favorite {
 model Rating {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
-  value     Int      // np. od 1 do 5 (gwiazdki)
-
+  value     Int
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   fileId    String
   file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, fileId])
 }
 
 model Comment {
   id        String   @id @default(uuid())
-  content   String   @db.Text
+  content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   fileId    String
   file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FlashcardDeck {
+  id         String      @id @default(uuid())
+  title      String
+  createdAt  DateTime    @default(now())
+  fileId     String
+  userId     String
+  flashcards Flashcard[]
+  file       File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("FlashcardDeck")
+}
+
+model Flashcard {
+  id     String        @id @default(uuid())
+  front  String
+  back   String
+  deckId String
+  deck   FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+
+  @@map("Flashcard")
+}
+
+enum UserRole {
+  STUDENT
+  ADMIN
+}
+
+enum Visibility {
+  PRIVATE
+  DIRECT
+  GROUP
+  YEAR
 }
